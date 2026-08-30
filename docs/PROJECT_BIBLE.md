@@ -1,8 +1,7 @@
 # PROJECT BIBLE
 ## AI-Powered Pull Request Risk Analysis & Software Engineering Intelligence Platform
 
-*Living document — update after every phase. Last updated: Phase 0 (redesign v2 — RAG added, SZZ dropped, complexity reduced). Not yet approved.*
-
+*Living document — update after every phase. Last updated: Phase 1.*
 ---
 
 ## 1. Objective
@@ -80,5 +79,6 @@ M1: Backend+GitHub API · M2: Dataset+ML+experiments · M3: Frontend+dashboard �
 Rate limits → cache+REST batching · label noise → document, spot-check sample · imbalance → right metrics, not accuracy · irrelevant RAG retrieval → doc curation, top-K tuning · missing repo docs → choose repos with real docs/guidelines · embedding cost/latency → cache embeddings, embed once per doc version · LLM invalid output → JSON-schema validation+retry · leakage → strict chronological split · coordination → shared bible + weekly review.
 
 ## 15. Phase Log
-- **Phase 0 — IN REVIEW**: redesigned scope with RAG, simplified labeling, MUST/GOOD/FUTURE classification — awaiting approval
-- **Phase 1 — NEXT**: environment + Git + project structure (once Phase 0 approved)
+- **Phase 0 — DONE & APPROVED**: research question, scope, methodology, RAG redesign
+- **Phase 1 — DONE**: repo created, `.gitignore`/`README`/`LICENSE` (MIT) on `main`; project skeleton merged via branch `chore/project-skeleton` + PR #1
+- **Phase 2 — NEXT**: PostgreSQL + schema design
