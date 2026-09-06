@@ -80,5 +80,7 @@ Rate limits → cache+REST batching · label noise → document, spot-check samp
 
 ## 15. Phase Log
 - **Phase 0 — DONE & APPROVED**: research question, scope, methodology, RAG redesign
-- **Phase 1 — DONE**: repo created, `.gitignore`/`README`/`LICENSE` (MIT) on `main`; project skeleton merged via branch `chore/project-skeleton` + PR #1
-- **Phase 2 — NEXT**: PostgreSQL + schema design
+- **Phase 1 — DONE**: repo, .gitignore/README/LICENSE, skeleton merged via PR
+- **Phase 2 — DONE**: PostgreSQL installed, pr_risk_dev + pr_risk_app (least privilege), 6-table schema built and merged
+- **Phase 3 — DONE**: FastAPI app, SQLAlchemy connection + get_db dependency, ORM models (verified against real schema), /health/db endpoint — all merged via PR
+- **Phase 4 — NEXT**: Authentication and authorization
