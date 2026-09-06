@@ -1,10 +1,12 @@
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from routes.auth import router as auth_router
 
 from database.connection import get_db
 
 app = FastAPI()
+app.include_router(auth_router)
 
 @app.get("/")
 def read_root():
