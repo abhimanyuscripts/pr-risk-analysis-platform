@@ -2,10 +2,11 @@ import os
 from urllib.parse import urlencode
 
 import httpx
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-
+from auth.jwt_handler import create_access_token
 from database.connection import get_db
 from database.models import User
 
@@ -29,7 +30,7 @@ def login():
 
 @router.get("/callback")
 async def callback(code: str, db: Session = Depends(get_db)):
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15.0) as client:
         token_response = await client.post(
             "https://github.com/login/oauth/access_token",
             data={
@@ -62,4 +63,5 @@ async def callback(code: str, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-    return {"message": "Login successful", "github_username": user.github_username, "user_id": str(user.id)}
+    access_token = create_access_token(str(user.id))
+    return {"access_token": access_token, "token_type": "bearer", "github_username": user.github_username}
