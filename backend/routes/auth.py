@@ -2,7 +2,7 @@ import os
 from urllib.parse import urlencode
 
 import httpx
-
+from auth.encryption import encrypt_token
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -56,12 +56,14 @@ async def callback(code: str, db: Session = Depends(get_db)):
     github_username = github_user.get("login")
     email = github_user.get("email")
 
+    encrypted = encrypt_token(access_token)
+
     user = db.query(User).filter(User.github_username == github_username).first()
     if not user:
-        user = User(github_username=github_username, email=email)
+        user = User(github_username=github_username, email=email, github_access_token=encrypted)
         db.add(user)
-        db.commit()
-        db.refresh(user)
+    else:
+        user.github_access_token = encrypted  # update on every login, in case the old token expired
 
-    access_token = create_access_token(str(user.id))
-    return {"access_token": access_token, "token_type": "bearer", "github_username": user.github_username}
+    db.commit()
+    db.refresh(user)

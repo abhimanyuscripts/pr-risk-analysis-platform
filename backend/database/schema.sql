@@ -73,3 +73,4 @@ CREATE TABLE pr_metrics (
     is_sensitive_file     BOOLEAN NOT NULL DEFAULT false,
     computed_at           TIMESTAMPTZ
 );
+ALTER TABLE users ADD COLUMN github_access_token TEXT;
