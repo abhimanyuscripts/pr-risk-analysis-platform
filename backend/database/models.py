@@ -16,6 +16,7 @@ class User(Base):
     github_username = Column(String(255), nullable=False, unique=True)
     email = Column(String(255), unique=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    github_access_token = Column(String)
 
     repositories = relationship("Repository", back_populates="added_by_user")
 
