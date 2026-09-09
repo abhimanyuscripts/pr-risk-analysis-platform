@@ -67,3 +67,5 @@ async def callback(code: str, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(user)
+    jwt_token = create_access_token(str(user.id))
+    return {"access_token": jwt_token, "token_type": "bearer", "github_username": user.github_username}
