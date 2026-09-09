@@ -5,9 +5,11 @@ from routes.auth import router as auth_router
 from auth.dependencies import get_current_user
 from database.models import User
 from database.connection import get_db
+from routes.github import router as github_router
 
 app = FastAPI()
 app.include_router(auth_router)
+app.include_router(github_router)
 
 @app.get("/")
 def read_root():
