@@ -8,6 +8,8 @@ from database.models import User
 from auth.dependencies import get_current_user
 from auth.encryption import decrypt_token
 from database.models import Repository, PullRequest
+from database.models import ChangedFile
+
 
 router = APIRouter(prefix="/github", tags=["github"])
 
@@ -124,6 +126,8 @@ async def ingest_repository(
         created_count = 0
         updated_count = 0
         total_commits = 0
+        total_files = 0
+        
 
         for pr in prs_data:
             # Derive our 3-value state from GitHub's state + merged flag
@@ -166,6 +170,9 @@ async def ingest_repository(
             )
             total_commits += commits_added
 
+            files_added = await ingest_changed_files_for_pr(client, token, owner, repo, pr["number"], pull_request_obj, db)
+            total_files += files_added
+
         db.commit()
 
         return {
@@ -173,6 +180,7 @@ async def ingest_repository(
             "prs_created": created_count,
             "prs_updated": updated_count,
             "commits_ingested": total_commits,
+            "files_ingested": total_files
         }
 
 async def ingest_commits_for_pr(client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int, pull_request: PullRequest, db: Session):
@@ -205,3 +213,32 @@ async def ingest_commits_for_pr(client: httpx.AsyncClient, token: str, owner: st
 
     return count
 
+async def ingest_changed_files_for_pr(client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int, pull_request: PullRequest, db: Session):
+    response = await client.get(
+        f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if response.status_code != 200:
+        return 0
+
+    files_data = response.json()
+    count = 0
+
+    for f in files_data:
+        existing = db.query(ChangedFile).filter(
+            ChangedFile.pull_request_id == pull_request.id,
+            ChangedFile.filename == f["filename"],
+        ).first()
+
+        if not existing:
+            new_file = ChangedFile(
+                pull_request_id=pull_request.id,
+                filename=f["filename"],
+                additions=f["additions"],
+                deletions=f["deletions"],
+                status=f["status"],
+            )
+            db.add(new_file)
+            count += 1
+
+    return count
