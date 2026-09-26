@@ -2,6 +2,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
+from database.models import Commit
 from database.connection import get_db
 from database.models import User
 from auth.dependencies import get_current_user
@@ -105,60 +106,102 @@ async def ingest_repository(
             raise HTTPException(status_code=502, detail="Failed to fetch pull requests from GitHub")
         prs_data = pr_response.json()
 
-    # --- Upsert the repository ---
-    repository = db.query(Repository).filter(Repository.github_repo_id == repo_data["id"]).first()
-    if not repository:
-        repository = Repository(
-            added_by=current_user.id,
-            owner=repo_data["owner"]["login"],
-            name=repo_data["name"],
-            full_name=repo_data["full_name"],
-            github_repo_id=repo_data["id"],
-        )
-        db.add(repository)
+        # --- Upsert the repository ---
+        repository = db.query(Repository).filter(Repository.github_repo_id == repo_data["id"]).first()
+        if not repository:
+            repository = Repository(
+                added_by=current_user.id,
+                owner=repo_data["owner"]["login"],
+                name=repo_data["name"],
+                full_name=repo_data["full_name"],
+                github_repo_id=repo_data["id"],
+            )
+            db.add(repository)
+            db.commit()
+            db.refresh(repository)
+
+        # --- Upsert each PR, and ingest its commits ---
+        created_count = 0
+        updated_count = 0
+        total_commits = 0
+
+        for pr in prs_data:
+            # Derive our 3-value state from GitHub's state + merged flag
+            if pr["state"] == "closed" and pr["merged_at"] is not None:
+                our_state = "merged"
+            else:
+                our_state = pr["state"]
+
+            existing = db.query(PullRequest).filter(
+                PullRequest.repository_id == repository.id,
+                PullRequest.github_pr_number == pr["number"],
+            ).first()
+
+            if existing:
+                existing.state = our_state
+                existing.merged_at = pr["merged_at"]
+                updated_count += 1
+                pull_request_obj = existing
+            else:
+                new_pr = PullRequest(
+                    repository_id=repository.id,
+                    github_pr_number=pr["number"],
+                    title=pr["title"],
+                    description=pr.get("body"),
+                    author_username=pr["user"]["login"],
+                    state=our_state,
+                    base_branch=pr["base"]["ref"],
+                    head_branch=pr["head"]["ref"],
+                    created_at=pr["created_at"],
+                    merged_at=pr["merged_at"],
+                )
+                db.add(new_pr)
+                created_count += 1
+                pull_request_obj = new_pr
+
+            db.flush()  # assigns pull_request_obj.id so commits can reference it via foreign key
+
+            commits_added = await ingest_commits_for_pr(
+                client, token, owner, repo, pr["number"], pull_request_obj, db
+            )
+            total_commits += commits_added
+
         db.commit()
-        db.refresh(repository)
 
-    # --- Upsert each PR ---
-    created_count = 0
-    updated_count = 0
+        return {
+            "repository": repository.full_name,
+            "prs_created": created_count,
+            "prs_updated": updated_count,
+            "commits_ingested": total_commits,
+        }
 
-    for pr in prs_data:
-        # Derive our 3-value state from GitHub's state + merged flag
-        if pr["state"] == "closed" and pr["merged_at"] is not None:
-            our_state = "merged"
-        else:
-            our_state = pr["state"]
+async def ingest_commits_for_pr(client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int, pull_request: PullRequest, db: Session):
+    response = await client.get(
+        f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/commits",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if response.status_code != 200:
+        return 0  # don't fail the whole ingestion if one PR's commits can't be fetched
 
-        existing = db.query(PullRequest).filter(
-            PullRequest.repository_id == repository.id,
-            PullRequest.github_pr_number == pr["number"],
+    commits_data = response.json()
+    count = 0
+
+    for c in commits_data:
+        existing = db.query(Commit).filter(
+            Commit.pull_request_id == pull_request.id,
+            Commit.sha == c["sha"],
         ).first()
 
-        if existing:
-            existing.state = our_state
-            existing.merged_at = pr["merged_at"]
-            updated_count += 1
-        else:
-            new_pr = PullRequest(
-                repository_id=repository.id,
-                github_pr_number=pr["number"],
-                title=pr["title"],
-                description=pr.get("body"),
-                author_username=pr["user"]["login"],
-                state=our_state,
-                base_branch=pr["base"]["ref"],
-                head_branch=pr["head"]["ref"],
-                created_at=pr["created_at"],
-                merged_at=pr["merged_at"],
+        if not existing:
+            new_commit = Commit(
+                pull_request_id=pull_request.id,
+                sha=c["sha"],
+                message=c["commit"]["message"],
+                author=c["commit"]["author"]["name"] if c["commit"]["author"] else None,
+                committed_at=c["commit"]["author"]["date"] if c["commit"]["author"] else None,
             )
-            db.add(new_pr)
-            created_count += 1
+            db.add(new_commit)
+            count += 1
 
-    db.commit()
+    return count
 
-    return {
-        "repository": repository.full_name,
-        "prs_created": created_count,
-        "prs_updated": updated_count,
-    }
