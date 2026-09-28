@@ -73,4 +73,14 @@ CREATE TABLE pr_metrics (
     is_sensitive_file     BOOLEAN NOT NULL DEFAULT false,
     computed_at           TIMESTAMPTZ
 );
+
+CREATE TABLE pr_labels (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pull_request_id UUID NOT NULL UNIQUE REFERENCES pull_requests(id),
+    is_risky BOOLEAN NOT NULL DEFAULT false,
+    reasons TEXT,
+    label_window_days INT NOT NULL DEFAULT 60,
+    labeled_at TIMESTAMPTZ
+);
+
 ALTER TABLE users ADD COLUMN github_access_token TEXT;
