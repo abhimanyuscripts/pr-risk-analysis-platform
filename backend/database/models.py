@@ -104,3 +104,13 @@ class PRMetrics(Base):
     computed_at = Column(DateTime(timezone=True))
 
     pull_request = relationship("PullRequest", back_populates="pr_metrics")
+
+class PRLabel(Base):
+    __tablename__ = "pr_labels"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    pull_request_id = Column(UUID(as_uuid=True), ForeignKey("pull_requests.id"), nullable=False, unique=True)
+    is_risky = Column(Boolean, nullable=False, default=False)
+    reasons = Column(Text)
+    label_window_days = Column(Integer, nullable=False, default=60)
+    labeled_at = Column(DateTime(timezone=True))
