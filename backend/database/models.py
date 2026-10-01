@@ -109,8 +109,12 @@ class PRLabel(Base):
     __tablename__ = "pr_labels"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    pull_request_id = Column(UUID(as_uuid=True), ForeignKey("pull_requests.id"), nullable=False, unique=True)
+    pull_request_id = Column(UUID(as_uuid=True), ForeignKey("pull_requests.id"), nullable=False)
     is_risky = Column(Boolean, nullable=False, default=False)
     reasons = Column(Text)
     label_window_days = Column(Integer, nullable=False, default=60)
     labeled_at = Column(DateTime(timezone=True))
+    label_version = Column(Integer, nullable=False, default=1)
+    window_complete = Column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (UniqueConstraint("pull_request_id", "label_version", name="pr_labels_pr_version_key"),)

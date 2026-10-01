@@ -76,11 +76,14 @@ CREATE TABLE pr_metrics (
 
 CREATE TABLE pr_labels (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    pull_request_id UUID NOT NULL UNIQUE REFERENCES pull_requests(id),
+    pull_request_id UUID NOT NULL REFERENCES pull_requests(id),
     is_risky BOOLEAN NOT NULL DEFAULT false,
     reasons TEXT,
     label_window_days INT NOT NULL DEFAULT 60,
-    labeled_at TIMESTAMPTZ
+    labeled_at TIMESTAMPTZ,
+    label_version INT NOT NULL DEFAULT 1,           -- 1 = original rule, 2 = refined rule (see routes/labels.py)
+    window_complete BOOLEAN NOT NULL DEFAULT true,  -- false if the PR's window runs past the end of the data
+    CONSTRAINT pr_labels_pr_version_key UNIQUE (pull_request_id, label_version)
 );
 
 ALTER TABLE users ADD COLUMN github_access_token TEXT;
