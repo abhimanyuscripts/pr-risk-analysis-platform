@@ -1,3 +1,4 @@
+import logging
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -10,6 +11,9 @@ from auth.encryption import decrypt_token
 from database.models import Repository, PullRequest
 from database.models import ChangedFile
 
+
+logger = logging.getLogger("uvicorn.error")  # shows up in the uvicorn terminal
+COMMIT_EVERY = 50  # PRs per DB commit, so a crash loses at most this many
 
 router = APIRouter(prefix="/github", tags=["github"])
 
@@ -155,7 +159,10 @@ async def ingest_repository(
         total_files = 0
         
 
-        for pr in prs_data:
+        logger.info("Ingest %s: fetched %d PRs, starting", repository.full_name, len(prs_data))
+        failed_prs = []
+
+        for i, pr in enumerate(prs_data, start=1):
             # Derive our 3-value state from GitHub's state + merged flag
             if pr["state"] == "closed" and pr["merged_at"] is not None:
                 our_state = "merged"
@@ -178,7 +185,7 @@ async def ingest_repository(
                     github_pr_number=pr["number"],
                     title=pr["title"],
                     description=pr.get("body"),
-                    author_username=pr["user"]["login"],
+                    author_username=(pr.get("user") or {}).get("login", "ghost"),  # deleted users come back as null
                     state=our_state,
                     base_branch=pr["base"]["ref"],
                     head_branch=pr["head"]["ref"],
@@ -191,22 +198,31 @@ async def ingest_repository(
 
             db.flush()  # assigns pull_request_obj.id so commits can reference it via foreign key
 
-            commits_added = await ingest_commits_for_pr(
-                client, token, owner, repo, pr["number"], pull_request_obj, db
-            )
-            total_commits += commits_added
+            try:
+                total_commits += await ingest_commits_for_pr(
+                    client, token, owner, repo, pr["number"], pull_request_obj, db
+                )
+                total_files += await ingest_changed_files_for_pr(
+                    client, token, owner, repo, pr["number"], pull_request_obj, db
+                )
+            except httpx.HTTPError as e:  # timeouts / connection errors: skip this PR, keep going
+                logger.warning("PR #%s: network error, commits/files skipped: %r", pr["number"], e)
+                failed_prs.append(pr["number"])
 
-            files_added = await ingest_changed_files_for_pr(client, token, owner, repo, pr["number"], pull_request_obj, db)
-            total_files += files_added
+            if i % COMMIT_EVERY == 0:
+                db.commit()
+                logger.info("Ingest progress: %d/%d PRs", i, len(prs_data))
 
         db.commit()
+        logger.info("Ingest done: %d PRs, %d failed", len(prs_data), len(failed_prs))
 
         return {
             "repository": repository.full_name,
             "prs_created": created_count,
             "prs_updated": updated_count,
             "commits_ingested": total_commits,
-            "files_ingested": total_files
+            "files_ingested": total_files,
+            "failed_prs": failed_prs,
         }
 
 async def ingest_commits_for_pr(client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int, pull_request: PullRequest, db: Session):
