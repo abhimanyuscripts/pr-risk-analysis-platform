@@ -13,6 +13,32 @@ from database.models import ChangedFile
 
 router = APIRouter(prefix="/github", tags=["github"])
 
+PER_PAGE = 100  # GitHub's maximum page size
+MAX_PAGES = 100  # safety cap so a bug can never loop forever
+
+
+async def fetch_all_pages(client: httpx.AsyncClient, url: str, token: str, params: dict | None = None):
+    """Fetch every page of a GitHub list endpoint.
+
+    GitHub has no explicit "last page" flag in the body, so we stop when a page
+    returns fewer than PER_PAGE items. Returns None if any request fails, so
+    callers decide whether that is fatal.
+    """
+    items = []
+    for page in range(1, MAX_PAGES + 1):
+        response = await client.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            params={**(params or {}), "per_page": PER_PAGE, "page": page},
+        )
+        if response.status_code != 200:
+            return None
+        batch = response.json()
+        items.extend(batch)
+        if len(batch) < PER_PAGE:
+            break
+    return items
+
 
 @router.get("/repos")
 async def list_repos(current_user: User = Depends(get_current_user)):
@@ -99,14 +125,14 @@ async def ingest_repository(
             raise HTTPException(status_code=502, detail="Failed to fetch repository from GitHub")
         repo_data = repo_response.json()
 
-        pr_response = await client.get(
+        prs_data = await fetch_all_pages(
+            client,
             f"https://api.github.com/repos/{owner}/{repo}/pulls",
-            headers={"Authorization": f"Bearer {token}"},
-            params={"state": "all", "per_page": 30, "sort": "updated"},
+            token,
+            params={"state": "all", "sort": "created", "direction": "asc"},
         )
-        if pr_response.status_code != 200:
+        if prs_data is None:
             raise HTTPException(status_code=502, detail="Failed to fetch pull requests from GitHub")
-        prs_data = pr_response.json()
 
         # --- Upsert the repository ---
         repository = db.query(Repository).filter(Repository.github_repo_id == repo_data["id"]).first()
@@ -184,14 +210,12 @@ async def ingest_repository(
         }
 
 async def ingest_commits_for_pr(client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int, pull_request: PullRequest, db: Session):
-    response = await client.get(
-        f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/commits",
-        headers={"Authorization": f"Bearer {token}"},
+    commits_data = await fetch_all_pages(
+        client, f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/commits", token
     )
-    if response.status_code != 200:
+    if commits_data is None:
         return 0  # don't fail the whole ingestion if one PR's commits can't be fetched
 
-    commits_data = response.json()
     count = 0
 
     for c in commits_data:
@@ -214,14 +238,12 @@ async def ingest_commits_for_pr(client: httpx.AsyncClient, token: str, owner: st
     return count
 
 async def ingest_changed_files_for_pr(client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int, pull_request: PullRequest, db: Session):
-    response = await client.get(
-        f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
-        headers={"Authorization": f"Bearer {token}"},
+    files_data = await fetch_all_pages(
+        client, f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files", token
     )
-    if response.status_code != 200:
+    if files_data is None:
         return 0
 
-    files_data = response.json()
     count = 0
 
     for f in files_data:
