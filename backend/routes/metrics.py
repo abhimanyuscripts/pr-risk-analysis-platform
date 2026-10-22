@@ -2,10 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
+from auth.dependencies import get_current_user
 from database.connection import get_db
 from database.models import Repository, PullRequest, Commit, ChangedFile, PRMetrics
 
-router = APIRouter(prefix="/metrics", tags=["metrics"])
+# every route here does heavy DB work, so all of them require a logged-in user
+router = APIRouter(prefix="/metrics", tags=["metrics"], dependencies=[Depends(get_current_user)])
 
 SENSITIVE_PATTERNS = ["auth", "login", "security", "payment", "migration", "password"]
 TEST_PATTERNS = ["test_", "_test", "/tests/", "spec_", "_spec"]

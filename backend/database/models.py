@@ -1,6 +1,6 @@
 import uuid
 from sqlalchemy import (
-    Column, String, Integer, Boolean, Text, DateTime,
+    Column, String, Integer, BigInteger, Boolean, Text, DateTime,
     ForeignKey, UniqueConstraint, CheckConstraint, text
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -13,6 +13,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    github_user_id = Column(BigInteger, unique=True)  # stable identity; usernames can change
     github_username = Column(String(255), nullable=False, unique=True)
     email = Column(String(255), unique=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
@@ -29,7 +30,7 @@ class Repository(Base):
     owner = Column(String(255), nullable=False)
     name = Column(String(255), nullable=False)
     full_name = Column(String(511), nullable=False, unique=True)
-    github_repo_id = Column(Integer, nullable=False, unique=True)
+    github_repo_id = Column(BigInteger, nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     added_by_user = relationship("User", back_populates="repositories")

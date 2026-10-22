@@ -3,10 +3,12 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from auth.dependencies import get_current_user
 from database.connection import get_db
 from database.models import Repository, PullRequest, Commit, ChangedFile, PRLabel
 
-router = APIRouter(prefix="/labels", tags=["labels"])
+# every route here does heavy DB work, so all of them require a logged-in user
+router = APIRouter(prefix="/labels", tags=["labels"], dependencies=[Depends(get_current_user)])
 
 # v1: loose substring match on any file (kept unchanged so v1 and v2 can be compared)
 FIX_PATTERNS = ["fix", "bug", "hotfix", "patch"]
