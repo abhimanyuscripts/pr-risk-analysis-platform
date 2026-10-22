@@ -87,3 +87,6 @@ CREATE TABLE pr_labels (
 );
 
 ALTER TABLE users ADD COLUMN github_access_token TEXT;
+
+-- GitHub's numeric user id: login matches on this because usernames can be renamed and reused
+ALTER TABLE users ADD COLUMN github_user_id BIGINT UNIQUE;

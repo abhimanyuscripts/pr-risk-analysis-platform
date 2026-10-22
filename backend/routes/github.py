@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import time
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -6,8 +8,7 @@ from datetime import datetime
 from database.models import Commit
 from database.connection import get_db
 from database.models import User
-from auth.dependencies import get_current_user
-from auth.encryption import decrypt_token
+from auth.dependencies import get_current_user, get_github_token
 from database.models import Repository, PullRequest
 from database.models import ChangedFile
 
@@ -19,6 +20,32 @@ router = APIRouter(prefix="/github", tags=["github"])
 
 PER_PAGE = 100  # GitHub's maximum page size
 MAX_PAGES = 100  # safety cap so a bug can never loop forever
+MAX_RATE_LIMIT_WAIT = 3600  # seconds; GitHub's hourly limit always resets within this
+
+
+class GitHubFetchError(Exception):
+    """A GitHub request for one PR's data failed, so that PR must be reported, not stored as empty."""
+
+
+async def github_get(client: httpx.AsyncClient, url: str, token: str, params: dict | None = None) -> httpx.Response:
+    """GET from the GitHub API. If a rate limit is hit, wait until it resets and retry once."""
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.get(url, headers=headers, params=params)
+    if response.status_code not in (403, 429):
+        return response
+
+    if "retry-after" in response.headers:  # secondary rate limit
+        wait = int(response.headers["retry-after"])
+    elif response.headers.get("x-ratelimit-remaining") == "0":  # hourly limit (5,000 requests)
+        wait = int(response.headers["x-ratelimit-reset"]) - time.time() + 1
+    else:
+        return response  # a real 403, e.g. no access to the repo
+    if wait > MAX_RATE_LIMIT_WAIT:
+        return response
+
+    logger.warning("GitHub rate limit hit, waiting %.0fs before retrying", wait)
+    await asyncio.sleep(max(wait, 0))
+    return await client.get(url, headers=headers, params=params)
 
 
 async def fetch_all_pages(client: httpx.AsyncClient, url: str, token: str, params: dict | None = None):
@@ -30,12 +57,11 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, token: str, param
     """
     items = []
     for page in range(1, MAX_PAGES + 1):
-        response = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            params={**(params or {}), "per_page": PER_PAGE, "page": page},
+        response = await github_get(
+            client, url, token, params={**(params or {}), "per_page": PER_PAGE, "page": page}
         )
         if response.status_code != 200:
+            logger.warning("GitHub returned %d for %s (page %d)", response.status_code, url, page)
             return None
         batch = response.json()
         items.extend(batch)
@@ -45,12 +71,7 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, token: str, param
 
 
 @router.get("/repos")
-async def list_repos(current_user: User = Depends(get_current_user)):
-    if not current_user.github_access_token:
-        raise HTTPException(status_code=400, detail="No GitHub token stored for this user")
-
-    token = decrypt_token(current_user.github_access_token)
-
+async def list_repos(token: str = Depends(get_github_token)):
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.get(
             "https://api.github.com/user/repos",
@@ -76,13 +97,8 @@ async def list_repos(current_user: User = Depends(get_current_user)):
 async def list_pull_requests(
     owner: str,
     repo: str,
-    current_user: User = Depends(get_current_user),
+    token: str = Depends(get_github_token),
 ):
-    if not current_user.github_access_token:
-        raise HTTPException(status_code=400, detail="No GitHub token stored for this user")
-
-    token = decrypt_token(current_user.github_access_token)
-
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.get(
             f"https://api.github.com/repos/{owner}/{repo}/pulls",
@@ -113,13 +129,9 @@ async def ingest_repository(
     owner: str,
     repo: str,
     current_user: User = Depends(get_current_user),
+    token: str = Depends(get_github_token),
     db: Session = Depends(get_db),
 ):
-    if not current_user.github_access_token:
-        raise HTTPException(status_code=400, detail="No GitHub token stored for this user")
-
-    token = decrypt_token(current_user.github_access_token)
-
     async with httpx.AsyncClient(timeout=15.0) as client:
         repo_response = await client.get(
             f"https://api.github.com/repos/{owner}/{repo}",
@@ -205,8 +217,8 @@ async def ingest_repository(
                 total_files += await ingest_changed_files_for_pr(
                     client, token, owner, repo, pr["number"], pull_request_obj, db
                 )
-            except httpx.HTTPError as e:  # timeouts / connection errors: skip this PR, keep going
-                logger.warning("PR #%s: network error, commits/files skipped: %r", pr["number"], e)
+            except (httpx.HTTPError, GitHubFetchError) as e:  # network errors / non-200s: skip this PR, keep going
+                logger.warning("PR #%s: commits/files skipped: %r", pr["number"], e)
                 failed_prs.append(pr["number"])
 
             if i % COMMIT_EVERY == 0:
@@ -229,8 +241,8 @@ async def ingest_commits_for_pr(client: httpx.AsyncClient, token: str, owner: st
     commits_data = await fetch_all_pages(
         client, f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/commits", token
     )
-    if commits_data is None:
-        return 0  # don't fail the whole ingestion if one PR's commits can't be fetched
+    if commits_data is None:  # the caller records this PR in failed_prs and carries on
+        raise GitHubFetchError(f"could not fetch commits for PR #{pr_number}")
 
     count = 0
 
@@ -258,7 +270,7 @@ async def ingest_changed_files_for_pr(client: httpx.AsyncClient, token: str, own
         client, f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files", token
     )
     if files_data is None:
-        return 0
+        raise GitHubFetchError(f"could not fetch changed files for PR #{pr_number}")
 
     count = 0
 
