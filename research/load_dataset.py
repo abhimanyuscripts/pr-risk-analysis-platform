@@ -1,4 +1,4 @@
-"""Phase 9, Task 1: load the training table and check it matches Phase 8."""
+"""Phase 9: load the training table (encode/httpx, v2 labels, complete windows)."""
 from pathlib import Path
 import os
 
@@ -6,9 +6,12 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-# Reuse the backend's database settings instead of copying the password here.
 load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
-engine = create_engine(os.getenv("DATABASE_URL"))
+
+FEATURES = [
+    "files_changed", "lines_added", "lines_deleted", "churn",
+    "commit_count", "test_files_changed", "is_sensitive_file",
+]
 
 QUERY = text("""
     SELECT pr.github_pr_number, pr.merged_at,
@@ -26,17 +29,23 @@ QUERY = text("""
     ORDER BY pr.merged_at
 """)
 
-with engine.connect() as conn:
-    df = pd.read_sql(QUERY, conn, params={"repo": "encode/httpx", "version": 2})
 
-print("Rows, columns:", df.shape)
-print("Merged from", df["merged_at"].min().date(), "to", df["merged_at"].max().date())
-print(f"Risky: {df['is_risky'].sum()} of {len(df)} ({df['is_risky'].mean():.0%})")
-print("\nMissing values per column:")
-print(df.isna().sum())
+def load_training_table(repo: str = "encode/httpx", version: int = 2) -> pd.DataFrame:
+    engine = create_engine(os.getenv("DATABASE_URL"))
+    with engine.connect() as conn:
+        df = pd.read_sql(QUERY, conn, params={"repo": repo, "version": version})
+    df["year"] = df["merged_at"].dt.year
+    return df
 
-df["year"] = df["merged_at"].dt.year
-by_year = df.groupby("year")["is_risky"].agg(prs="size", risky="sum", rate="mean")
-by_year["rate"] = (by_year["rate"] * 100).round(0)
-print("\nRisky rate by merge year (%):")
-print(by_year)
+
+if __name__ == "__main__":
+    df = load_training_table()
+    print("Rows, columns:", df.shape)
+    print("Merged from", df["merged_at"].min().date(), "to", df["merged_at"].max().date())
+    print(f"Risky: {df['is_risky'].sum()} of {len(df)} ({df['is_risky'].mean():.0%})")
+    print("\nMissing values per column:")
+    print(df.isna().sum())
+    by_year = df.groupby("year")["is_risky"].agg(prs="size", risky="sum", rate="mean")
+    by_year["rate"] = (by_year["rate"] * 100).round(0)
+    print("\nRisky rate by merge year (%):")
+    print(by_year)
