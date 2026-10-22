@@ -97,4 +97,12 @@ Rate limits → cache+REST batching · label noise → document, spot-check samp
 - **Phase 6 — DONE**: commit and changed-file ingestion per PR
 - **Phase 7 — DONE**: traditional metrics (files changed, lines added/deleted, churn, commit count, test files changed, sensitive-file flag) in `pr_metrics`
 - **Phase 8 — DONE (closed)**: pagination (PR #17) and ingestion resilience — ghost users, per-PR network-error skip, commit every 50 PRs, progress logging (PR #18); `encode/httpx` ingested (1,805 PRs, 0 failed), metrics computed; versioned risk labels v1/v2 (PR #19); issue-based signal tested and dropped (see 4a). Schema migration for `pr_labels` was applied by hand (no migration tool yet; SQL is in PR #19).
-- **Phase 9 — NEXT**: ML baseline (Logistic Regression, Random Forest) on `pr_metrics` with v2 labels, chronological split, per-year reporting, rule-based baseline first
+- **Phase 9 — DONE**: ML baseline on `encode/httpx`, v2 labels, window_complete = true (1,294 PRs, 584 risky). Code in `research/` (load_dataset, split, evaluate, baseline_rule, logreg, random_forest).
+  - Split: chronological 70/30. Train 905 PRs (2019-04 to 2022-05, 56.2% risky); test 389 (2022-05 to 2025-12, 19.3% risky). Plus expanding yearly splits, test years 2020–2025.
+  - Main-split test results: flag-everything P 0.193 / R 1.00 / F1 0.323 / AUC 0.500 · churn ≥ 23 rule P 0.459 / R 0.68 / F1 0.548 / AUC 0.817 · LogReg size-only F1 0.517 / AUC 0.799 · LogReg all 7 F1 0.490 / AUC 0.791 · Random Forest (300 trees, min_samples_leaf 5, seed 42) F1 0.525 / AUC 0.780.
+  - Yearly AUC 2020–2024: rule 0.721–0.853, LogReg 0.727–0.852, RF 0.722–0.836. Learned models clearly beat the rule only in 2020. 2025 has 0 risky PRs, so it is not scored.
+  - Finding: no learned model beats the churn rule on the main split; differences are small and not yet tested for significance.
+  - Size confound: risky rate by files changed 19% / 51% / 63% / 76% / 85% (1 / 2 / 3–4 / 5–8 / 9+).
+  - Test-file confound: within every size band, PRs touching test files are labeled risky more often (1 file: 18% vs 38%; 2 files: 33% vs 72%). test_files_changed is the top feature (LogReg weight +1.18, RF permutation importance 0.061). Likely a label artifact (fix PRs add tests to the same files, or fix chains); never report it as "tests increase risk".
+  - The 0.5 cut-off over-flags on the test set because of the train/test label shift.
+- **Phase 10 — NEXT**: evaluation depth (see below).
