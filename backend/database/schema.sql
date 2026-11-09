@@ -94,3 +94,23 @@ ALTER TABLE users ADD COLUMN github_user_id BIGINT UNIQUE;
 -- Phase 11: GitHub's per-file diff ('patch') so the LLM can read what changed.
 -- NULL when GitHub sends no patch (binary or very large files) or it was not fetched yet.
 ALTER TABLE changed_files ADD COLUMN patch TEXT;
+
+-- Phase 11: one stored LLM answer per PR, model, prompt version and RAG setting.
+-- Ask once, save, reuse: experiments and the dashboard read from here, never re-ask.
+CREATE TABLE llm_analyses (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pull_request_id  UUID NOT NULL REFERENCES pull_requests(id),
+    model            VARCHAR(100) NOT NULL,
+    prompt_version   INT NOT NULL,
+    use_rag          BOOLEAN NOT NULL DEFAULT false,
+    risk_score       INT NOT NULL CHECK (risk_score BETWEEN 0 AND 100),
+    risk_level       VARCHAR(10) NOT NULL CHECK (risk_level IN ('low', 'medium', 'high')),
+    result           JSONB NOT NULL,
+    diff_truncated   BOOLEAN NOT NULL DEFAULT false,
+    input_tokens     INT,
+    output_tokens    INT,
+    latency_ms       INT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (pull_request_id, model, prompt_version, use_rag)
+);
+CREATE INDEX idx_llm_analyses_pull_request_id ON llm_analyses(pull_request_id);
