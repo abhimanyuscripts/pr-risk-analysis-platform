@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from auth.dependencies import get_current_user
 from database.connection import get_db
 from database.models import Repository, PullRequest, Commit, ChangedFile, PRLabel
+from routes.metrics import TEST_PATTERNS
 
 # every route here does heavy DB work, so all of them require a logged-in user
 router = APIRouter(prefix="/labels", tags=["labels"], dependencies=[Depends(get_current_user)])
@@ -29,6 +30,13 @@ def is_source_file(filename: str) -> bool:
     if lower.startswith(NON_SOURCE_PREFIXES) or lower.endswith(NON_SOURCE_SUFFIXES):
         return False
     return not base.startswith(NON_SOURCE_NAMES)
+
+
+# v3: fix PRs usually add a test to the same test files, so test-file overlap
+# says little about the earlier PR's code. v3 ignores test files when matching.
+def is_test_file(filename: str) -> bool:
+    lower = filename.lower()
+    return lower.startswith("tests/") or any(p in lower for p in TEST_PATTERNS)
 
 
 def message_is_corrective(message: str | None, version: int) -> bool:
@@ -55,10 +63,15 @@ def compute_label_for_pr(pr: PullRequest, all_prs: list[PullRequest], db: Sessio
         reasons.append("reverted")
 
     # --- Signal 2: corrective commit on a touched file, within the window ---
-    # v2 only counts source files as overlap; v1 counts every file
+    # v1 counts every file; v2 only source files; v3 source files minus test files
     def overlap_files(pr_id):
         names = {f.filename for f in db.query(ChangedFile).filter(ChangedFile.pull_request_id == pr_id).all()}
-        return names if version == 1 else {n for n in names if is_source_file(n)}
+        if version == 1:
+            return names
+        names = {n for n in names if is_source_file(n)}
+        if version == 3:
+            names = {n for n in names if not is_test_file(n)}
+        return names
 
     my_files = overlap_files(pr.id)
     window_end = pr.merged_at + timedelta(days=WINDOW_DAYS)
@@ -91,8 +104,8 @@ def compute_label_for_pr(pr: PullRequest, all_prs: list[PullRequest], db: Sessio
 
 @router.post("/compute/{owner}/{repo}")
 def compute_labels_for_repo(owner: str, repo: str, version: int = 2, db: Session = Depends(get_db)):
-    if version not in (1, 2):
-        raise HTTPException(status_code=400, detail="version must be 1 or 2")
+    if version not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="version must be 1, 2 or 3")
 
     repository = db.query(Repository).filter(Repository.owner == owner, Repository.name == repo).first()
     if not repository:
