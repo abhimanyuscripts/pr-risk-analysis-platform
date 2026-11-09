@@ -86,6 +86,7 @@ class ChangedFile(Base):
     additions = Column(Integer, nullable=False, default=0)
     deletions = Column(Integer, nullable=False, default=0)
     status = Column(String(20))
+    patch = Column(Text)  # GitHub's diff for this file; NULL for binary/huge files or not fetched
 
     pull_request = relationship("PullRequest", back_populates="changed_files")
 

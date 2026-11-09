@@ -90,3 +90,7 @@ ALTER TABLE users ADD COLUMN github_access_token TEXT;
 
 -- GitHub's numeric user id: login matches on this because usernames can be renamed and reused
 ALTER TABLE users ADD COLUMN github_user_id BIGINT UNIQUE;
+
+-- Phase 11: GitHub's per-file diff ('patch') so the LLM can read what changed.
+-- NULL when GitHub sends no patch (binary or very large files) or it was not fetched yet.
+ALTER TABLE changed_files ADD COLUMN patch TEXT;
