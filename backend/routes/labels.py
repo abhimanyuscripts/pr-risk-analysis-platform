@@ -47,7 +47,10 @@ def message_is_corrective(message: str | None, version: int) -> bool:
     return FIX_REGEX.search(message) is not None
 
 
-def compute_label_for_pr(pr: PullRequest, all_prs: list[PullRequest], db: Session, version: int = 2) -> tuple[bool, list[str]]:
+def compute_label_for_pr(pr: PullRequest, all_prs: list[PullRequest], db: Session, version: int = 2,
+                         window_days: int = WINDOW_DAYS) -> tuple[bool, list[str]]:
+    # window_days is a parameter only so research/window_sensitivity.py can test 30/90 days;
+    # the API route always uses WINDOW_DAYS (60).
     reasons = []
 
     if pr.state != "merged" or pr.merged_at is None:
@@ -74,7 +77,7 @@ def compute_label_for_pr(pr: PullRequest, all_prs: list[PullRequest], db: Sessio
         return names
 
     my_files = overlap_files(pr.id)
-    window_end = pr.merged_at + timedelta(days=WINDOW_DAYS)
+    window_end = pr.merged_at + timedelta(days=window_days)
 
     corrective_hit = False
     for other in all_prs:
