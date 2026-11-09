@@ -30,7 +30,8 @@ QUERY = text("""
 """)
 
 
-def load_training_table(repo: str = "encode/httpx", version: int = 2) -> pd.DataFrame:
+def load_training_table(repo: str = "encode/httpx", version: int | None = None) -> pd.DataFrame:
+    version = version or int(os.getenv("LABEL_VERSION", "2"))
     engine = create_engine(os.getenv("DATABASE_URL"))
     with engine.connect() as conn:
         df = pd.read_sql(QUERY, conn, params={"repo": repo, "version": version})

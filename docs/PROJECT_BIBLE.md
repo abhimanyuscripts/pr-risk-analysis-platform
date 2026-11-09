@@ -1,7 +1,7 @@
 # PROJECT BIBLE
 ## AI-Powered Pull Request Risk Analysis & Software Engineering Intelligence Platform
 
-*Living document — update after every phase. Last updated: Phase 8 closed.*
+*Living document — update after every phase. Last updated: Phase 9 closed, v3 label added (Nov 2026).*
 ---
 
 ## 1. Objective
@@ -24,10 +24,16 @@ A PR has "subsequent corrective activity associated with it" (risky) if, within 
 - a file it touched received a fix-pattern commit.
 Deliberately non-causal wording — we never claim the PR *caused* the bug, only that corrective activity is *associated* with it. Documented limitations: coincidental file overlap, inconsistent commit conventions, delayed bug surfacing. SZZ line-tracing = future work.
 
-### 4a. As implemented (Phase 8) — window W = 60 days, leakage-safe (only PRs merged strictly after the one being labeled)
+### 4a. As implemented (Phase 8; v3 added after Phase 9) — window W = 60 days, leakage-safe (only PRs merged strictly after the one being labeled)
 Signals 1 and 3 above are implemented; **signal 2 (bug-labeled issues) was tested and dropped** (see below). Labels are stored versioned in `pr_labels` (`label_version`, `window_complete`).
 - **v1:** reverted (`Revert "<title>"` merged later) OR a later merged PR has a commit whose message contains fix/bug/hotfix/patch (substring) and touches any shared file.
 - **v2 (working label):** same definition, refined: overlap ignores non-source hub files (CHANGELOG*, requirements*, LICENSE*, docs/, .github/, .md/.rst/.txt/.lock/.yml/.yaml); fix keywords match as whole words (fix, fixes, fixed, bug, hotfix) — bare "patch" dropped (HTTP PATCH, "dispatch", mock patching); `window_complete=false` when the PR's window runs past the last merge in the data (exclude from training).
+- **v3 (added Nov 2026, after Phase 9):** v2 rule, but test files (TEST_PATTERNS from `routes/metrics.py`, or anything under `tests/`) are ignored when matching shared files. Reason: fix PRs usually add tests to the same test files, so test-file overlap says little about the earlier PR's code. Decided after seeing Phase 9 results, so v2 and v3 are both reported, never swapped silently. Consequence: a PR that touched only test files can be risky only through a revert. Code: `is_test_file()` in `routes/labels.py`; compute with `POST /labels/compute/{owner}/{repo}?version=3`; research scripts read `LABEL_VERSION` (default 2).
+  - 1,294 usable PRs: v2 584 risky (45.1%) → v3 520 (40.2%). 64 PRs moved risky→safe, 0 safe→risky; 56 of the 64 are in 2019–2020.
+  - v3 risky rate by merge year: 2019 59.2%, 2020 54.8%, 2021 33.6%, 2022 17.5%, 2023 12.3%, 2024 27.5%, 2025 0% (label shift remains, slightly smaller).
+  - Size effect remains: v3 risky rate by files changed 16 / 45 / 57 / 72 / 73% (1 / 2 / 3–4 / 5–8 / 9+).
+  - Test-file effect shrank but remains: within the same size band, with vs without test files — 2 files 61% vs 32%, 3–4 files 64% vs 46%, 5–8 files 78% vs 56%, 9+ files 77% vs 42% (v2: 72/72/83/91% with tests). So test-file overlap explains only part of it. Untested hypothesis: PRs touching tests are often bug fixes in active areas, followed by further fixes ("fix chains").
+  - Main label from Phase 10 onwards: not yet decided (proposed: v3, with v2 reported alongside).
 - **Dataset: `encode/httpx`** — 1,805 PRs (1,295 merged), 5,910 commits, 6,450 changed files, 2019-04 to 2026-03. 3 PRs by deleted users are stored as `ghost`.
 - **Results:** v1 flags 920/1,295 merged PRs (71%). v2 flags 584/1,294 usable (45%); 336 v1 positives dropped. v2 risky rate by merge year: 2019 69%, 2020 61%, 2021 35%, 2022 17%, 2023 16%, 2024 28%, 2025 0%.
 - **Known limitation (document in the write-up):** v2 is still activity-confounded — the rate tracks how many PRs were merged nearby (dense early years, sparse recent years), not code quality. A chronological split will therefore face a large label-prior shift; Phase 9 must report per-year results and compare against the rule-based baseline.
@@ -105,4 +111,5 @@ Rate limits → cache+REST batching · label noise → document, spot-check samp
   - Size confound: risky rate by files changed 19% / 51% / 63% / 76% / 85% (1 / 2 / 3–4 / 5–8 / 9+).
   - Test-file confound: within every size band, PRs touching test files are labeled risky more often (1 file: 18% vs 38%; 2 files: 33% vs 72%). test_files_changed is the top feature (LogReg weight +1.18, RF permutation importance 0.061). Likely a label artifact (fix PRs add tests to the same files, or fix chains); never report it as "tests increase risk".
   - The 0.5 cut-off over-flags on the test set because of the train/test label shift.
-- **Phase 10 — NEXT**: evaluation depth (see below).
+- **v3 label — DONE** (branch `feat/label-v3`): see 4a. Phase 9 models re-run on v3 (test 389 PRs, 17.7% risky): churn rule F1 0.522 / AUC 0.805 · LogReg all 7 F1 0.524 / AUC 0.810 · Random Forest F1 0.529 / AUC 0.767. Yearly AUC 2020–2024: rule 0.668–0.819, LogReg 0.674–0.818, RF 0.729–0.817 (learned models ahead in 2020, 2022, 2024). RF permutation importance: files_changed 0.125, all others ≈ 0. Conclusion unchanged from v2: ML ≈ size rule; differences not yet tested for significance. Comparison script: `research/compare_labels.py`.
+- **Phase 10 — NEXT**: evaluation depth: (1) bootstrap confidence intervals for AUC/F1 to test whether method differences are real; (2) a cut-off chosen for the label shift instead of a blind 0.5; (3) label-window sensitivity (30 / 90 days vs 60); (4) optional SHAP explanations. Report v2 and v3 side by side.
