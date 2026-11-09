@@ -8,6 +8,9 @@ from sqlalchemy import create_engine, text
 
 load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
 
+# Main label from Phase 10 on is v3; run with LABEL_VERSION=2 to reproduce v2 results.
+DEFAULT_LABEL_VERSION = 3
+
 FEATURES = [
     "files_changed", "lines_added", "lines_deleted", "churn",
     "commit_count", "test_files_changed", "is_sensitive_file",
@@ -31,7 +34,7 @@ QUERY = text("""
 
 
 def load_training_table(repo: str = "encode/httpx", version: int | None = None) -> pd.DataFrame:
-    version = version or int(os.getenv("LABEL_VERSION", "2"))
+    version = version or int(os.getenv("LABEL_VERSION", DEFAULT_LABEL_VERSION))
     engine = create_engine(os.getenv("DATABASE_URL"))
     with engine.connect() as conn:
         df = pd.read_sql(QUERY, conn, params={"repo": repo, "version": version})
