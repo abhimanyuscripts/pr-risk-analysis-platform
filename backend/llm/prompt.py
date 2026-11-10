@@ -28,8 +28,12 @@ risk_score guide (0-100):
 risk_level: low for 0-33, medium for 34-66, high for 67-100."""
 
 
-def build_prompt(pr, files, repo_name: str) -> tuple[str, bool]:
-    """Return (prompt text, whether any diff was cut short)."""
+def build_prompt(pr, files, repo_name: str, doc_chunks=None) -> tuple[str, bool]:
+    """Return (prompt text, whether any diff was cut short).
+
+    doc_chunks: optional [(heading, text)] retrieved from the repository's docs (RAG).
+    Without it the prompt is exactly prompt v1, so RAG vs no-RAG differ only in this block.
+    """
     description = (pr.description or "").strip()[:MAX_DESCRIPTION_CHARS] or "(none)"
     ordered = sorted(files, key=lambda f: f.additions + f.deletions, reverse=True)
     file_list = "\n".join(
@@ -54,8 +58,17 @@ def build_prompt(pr, files, repo_name: str) -> tuple[str, bool]:
         used += len(block)
 
     diff = "".join(parts) or "(no diff available)"
+    docs_block = ""
+    if doc_chunks:
+        docs_block = (
+            "\n\nPROJECT DOCUMENTATION (retrieved automatically from this repository's docs. "
+            "Use it to check whether the change conflicts with documented behaviour or "
+            "contribution rules, and name the section if you rely on it. It may be irrelevant.):\n"
+            + "\n\n".join(f"[{heading}]\n{text}" for heading, text in doc_chunks)
+        )
     prompt = (
         INSTRUCTIONS.format(repo=repo_name)
+        + docs_block
         + f"\n\nTITLE: {pr.title}"
         + f"\n\nDESCRIPTION:\n{description}"
         + f"\n\nCHANGED FILES (largest change first):\n{file_list}"

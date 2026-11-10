@@ -139,6 +139,7 @@ class LLMAnalysis(Base):
     input_tokens = Column(Integer)
     output_tokens = Column(Integer)
     latency_ms = Column(Integer)
+    retrieved_chunks = Column(JSONB)  # RAG only: which doc chunks were shown, with distances
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
     __table_args__ = (UniqueConstraint("pull_request_id", "model", "prompt_version", "use_rag"),)

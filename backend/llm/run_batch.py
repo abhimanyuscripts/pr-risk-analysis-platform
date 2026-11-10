@@ -22,6 +22,7 @@ parser.add_argument("--repo", default="encode/httpx")
 parser.add_argument("--since", type=date.fromisoformat, required=True)
 parser.add_argument("--limit", type=int, default=5, help="max NEW model calls this run")
 parser.add_argument("--pause", type=float, default=4.0, help="seconds between calls")
+parser.add_argument("--rag", action="store_true", help="add retrieved repository docs to the prompt")
 args = parser.parse_args()
 
 db = SessionLocal()
@@ -31,7 +32,7 @@ since = datetime.combine(args.since, datetime.min.time(), tzinfo=timezone.utc)
 prs = (db.query(PullRequest)
        .filter(PullRequest.repository_id == repo.id, PullRequest.merged_at >= since)
        .order_by(PullRequest.merged_at).all())
-print(f"{len(prs)} merged PRs since {args.since}; model {GEMINI_MODEL}; up to {args.limit} new calls\n")
+print(f"{len(prs)} merged PRs since {args.since}; model {GEMINI_MODEL}; RAG {'on' if args.rag else 'off'}; up to {args.limit} new calls\n")
 
 client = get_client()
 calls = new = cached = failed = 0
@@ -40,7 +41,7 @@ for pr in prs:
     if calls >= args.limit:
         break
     try:
-        row, from_cache = analyze_pr(db, pr, client)
+        row, from_cache = analyze_pr(db, pr, client, use_rag=args.rag)
     except errors.ClientError as exc:
         if exc.code == 429:
             print("Free-tier limit reached. Stopping; saved answers are kept, re-run later to continue.")
@@ -62,6 +63,8 @@ for pr in prs:
           f"{', diff cut' if row.diff_truncated else ''}  {pr.title[:50]}")
     if not shown_example:
         print("   example answer:", json.dumps(row.result, indent=2).replace("\n", "\n   "))
+        if row.retrieved_chunks:
+            print("   docs shown:", "; ".join(c["heading"] for c in row.retrieved_chunks))
         shown_example = True
     time.sleep(args.pause)
 

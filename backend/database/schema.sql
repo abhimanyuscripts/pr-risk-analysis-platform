@@ -140,3 +140,6 @@ CREATE TABLE document_chunks (
     UNIQUE (document_id, chunk_index, embedding_model)
 );
 CREATE INDEX idx_document_chunks_document_id ON document_chunks(document_id);
+
+-- Phase 14: which doc chunks a RAG answer was given (NULL for non-RAG answers).
+ALTER TABLE llm_analyses ADD COLUMN retrieved_chunks JSONB;
