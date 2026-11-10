@@ -114,3 +114,29 @@ CREATE TABLE llm_analyses (
     UNIQUE (pull_request_id, model, prompt_version, use_rag)
 );
 CREATE INDEX idx_llm_analyses_pull_request_id ON llm_analyses(pull_request_id);
+
+-- Phase 12 (RAG). Needs the pgvector extension, created once by a database admin:
+--   CREATE EXTENSION vector;
+-- One row per documentation file, pinned to the exact commit it was read from.
+CREATE TABLE repo_documents (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    repository_id  UUID NOT NULL REFERENCES repositories(id),
+    path           VARCHAR(500) NOT NULL,
+    commit_sha     VARCHAR(40) NOT NULL,
+    content        TEXT NOT NULL,
+    fetched_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (repository_id, path, commit_sha)
+);
+
+-- Pieces of those documents with their meaning vector (384 numbers per chunk).
+CREATE TABLE document_chunks (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id      UUID NOT NULL REFERENCES repo_documents(id),
+    chunk_index      INT NOT NULL,
+    heading          TEXT,
+    content          TEXT NOT NULL,
+    embedding_model  VARCHAR(100) NOT NULL,
+    embedding        vector(384) NOT NULL,
+    UNIQUE (document_id, chunk_index, embedding_model)
+);
+CREATE INDEX idx_document_chunks_document_id ON document_chunks(document_id);
