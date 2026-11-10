@@ -46,7 +46,14 @@ def analyze_pr(db: Session, pr: PullRequest, client=None, model: str = GEMINI_MO
 
     repo = db.get(Repository, pr.repository_id)
     files = db.query(ChangedFile).filter(ChangedFile.pull_request_id == pr.id).all()
-    prompt, truncated = build_prompt(pr, files, repo.full_name)
+    doc_chunks, retrieved = None, None
+    if use_rag:
+        from rag.retrieve import context_for_pr  # imported only for RAG (loads the embedding model)
+        hits = context_for_pr(db, pr, files)
+        doc_chunks = [(chunk.heading, chunk.content) for chunk, _ in hits]
+        retrieved = [{"chunk_id": str(chunk.id), "heading": chunk.heading, "distance": round(dist, 4)}
+                     for chunk, dist in hits]
+    prompt, truncated = build_prompt(pr, files, repo.full_name, doc_chunks)
 
     client = client or get_client()
     config = types.GenerateContentConfig(
@@ -73,6 +80,7 @@ def analyze_pr(db: Session, pr: PullRequest, client=None, model: str = GEMINI_MO
         risk_score=result.risk_score, risk_level=result.risk_level, result=result.model_dump(),
         diff_truncated=truncated, input_tokens=usage.prompt_token_count,
         output_tokens=usage.candidates_token_count, latency_ms=latency_ms,
+        retrieved_chunks=retrieved,
     )
     db.add(row)
     db.commit()

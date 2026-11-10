@@ -4,6 +4,7 @@ from sqlalchemy import (
     ForeignKey, UniqueConstraint, CheckConstraint, text
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 
 from database.connection import Base
@@ -138,6 +139,36 @@ class LLMAnalysis(Base):
     input_tokens = Column(Integer)
     output_tokens = Column(Integer)
     latency_ms = Column(Integer)
+    retrieved_chunks = Column(JSONB)  # RAG only: which doc chunks were shown, with distances
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
     __table_args__ = (UniqueConstraint("pull_request_id", "model", "prompt_version", "use_rag"),)
+
+
+class RepoDocument(Base):
+    """One documentation file of a repository, pinned to a commit (Phase 12)."""
+    __tablename__ = "repo_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    repository_id = Column(UUID(as_uuid=True), ForeignKey("repositories.id"), nullable=False)
+    path = Column(String(500), nullable=False)
+    commit_sha = Column(String(40), nullable=False)
+    content = Column(Text, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+    __table_args__ = (UniqueConstraint("repository_id", "path", "commit_sha"),)
+
+
+class DocumentChunk(Base):
+    """A piece of a RepoDocument with its embedding vector (Phase 13)."""
+    __tablename__ = "document_chunks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    document_id = Column(UUID(as_uuid=True), ForeignKey("repo_documents.id"), nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    heading = Column(Text)
+    content = Column(Text, nullable=False)
+    embedding_model = Column(String(100), nullable=False)
+    embedding = Column(Vector(384), nullable=False)
+
+    __table_args__ = (UniqueConstraint("document_id", "chunk_index", "embedding_model"),)
