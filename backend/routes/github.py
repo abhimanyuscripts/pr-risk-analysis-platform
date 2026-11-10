@@ -4,7 +4,7 @@ import time
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import date, datetime, timezone
 from database.models import Commit
 from database.connection import get_db
 from database.models import User
@@ -287,8 +287,77 @@ async def ingest_changed_files_for_pr(client: httpx.AsyncClient, token: str, own
                 additions=f["additions"],
                 deletions=f["deletions"],
                 status=f["status"],
+                patch=f.get("patch"),
             )
             db.add(new_file)
             count += 1
 
     return count
+
+
+@router.post("/repos/{owner}/{repo}/patches")
+async def ingest_patches(
+    owner: str,
+    repo: str,
+    merged_since: date,
+    current_user: User = Depends(get_current_user),
+    token: str = Depends(get_github_token),
+    db: Session = Depends(get_db),
+):
+    """Phase 11: add each file's diff to changed_files for PRs merged since a date.
+
+    Earlier ingestion stored only file names and line counts. The LLM needs the
+    actual code changes, but only for the PRs it will analyse, so this fills the
+    patch column for a date range instead of re-ingesting the whole repository.
+    Safe to re-run: it overwrites the same patch values.
+    """
+    repository = db.query(Repository).filter(Repository.owner == owner, Repository.name == repo).first()
+    if not repository:
+        raise HTTPException(status_code=404, detail="Repository not found — ingest it first")
+
+    since = datetime.combine(merged_since, datetime.min.time(), tzinfo=timezone.utc)
+    prs = (
+        db.query(PullRequest)
+        .filter(PullRequest.repository_id == repository.id, PullRequest.merged_at >= since)
+        .order_by(PullRequest.merged_at)
+        .all()
+    )
+    logger.info("Patches %s/%s: %d merged PRs since %s", owner, repo, len(prs), merged_since)
+
+    files_with_patch = 0
+    files_without_patch = 0
+    failed_prs = []
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for i, pr in enumerate(prs, start=1):
+            try:
+                files_data = await fetch_all_pages(
+                    client, f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr.github_pr_number}/files", token
+                )
+            except httpx.HTTPError as exc:
+                logger.warning("PR #%d: network error %s", pr.github_pr_number, exc)
+                files_data = None
+            if files_data is None:
+                failed_prs.append(pr.github_pr_number)
+                continue
+
+            patches = {f["filename"]: f.get("patch") for f in files_data}
+            for changed in db.query(ChangedFile).filter(ChangedFile.pull_request_id == pr.id).all():
+                changed.patch = patches.get(changed.filename)
+                if changed.patch is None:
+                    files_without_patch += 1
+                else:
+                    files_with_patch += 1
+
+            if i % COMMIT_EVERY == 0:
+                db.commit()
+                logger.info("Patch progress: %d/%d PRs", i, len(prs))
+
+    db.commit()
+    return {
+        "repository": repository.full_name,
+        "merged_since": str(merged_since),
+        "prs_processed": len(prs) - len(failed_prs),
+        "files_with_patch": files_with_patch,
+        "files_without_patch": files_without_patch,  # binary or very large files: GitHub sends no diff
+        "failed_prs": failed_prs,
+    }

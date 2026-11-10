@@ -3,7 +3,7 @@ from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, Text, DateTime,
     ForeignKey, UniqueConstraint, CheckConstraint, text
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from database.connection import Base
@@ -86,6 +86,7 @@ class ChangedFile(Base):
     additions = Column(Integer, nullable=False, default=0)
     deletions = Column(Integer, nullable=False, default=0)
     status = Column(String(20))
+    patch = Column(Text)  # GitHub's diff for this file; NULL for binary/huge files or not fetched
 
     pull_request = relationship("PullRequest", back_populates="changed_files")
 
@@ -119,3 +120,24 @@ class PRLabel(Base):
     window_complete = Column(Boolean, nullable=False, default=True)
 
     __table_args__ = (UniqueConstraint("pull_request_id", "label_version", name="pr_labels_pr_version_key"),)
+
+
+class LLMAnalysis(Base):
+    """One stored LLM answer (Phase 11). Unique per PR + model + prompt version + RAG setting."""
+    __tablename__ = "llm_analyses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    pull_request_id = Column(UUID(as_uuid=True), ForeignKey("pull_requests.id"), nullable=False)
+    model = Column(String(100), nullable=False)
+    prompt_version = Column(Integer, nullable=False)
+    use_rag = Column(Boolean, nullable=False, default=False)
+    risk_score = Column(Integer, nullable=False)
+    risk_level = Column(String(10), nullable=False)
+    result = Column(JSONB, nullable=False)
+    diff_truncated = Column(Boolean, nullable=False, default=False)
+    input_tokens = Column(Integer)
+    output_tokens = Column(Integer)
+    latency_ms = Column(Integer)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+    __table_args__ = (UniqueConstraint("pull_request_id", "model", "prompt_version", "use_rag"),)
