@@ -2,12 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
-from auth.dependencies import get_current_user
+from auth.dependencies import require_writer
 from database.connection import get_db
-from database.models import Repository, PullRequest, Commit, ChangedFile, PRMetrics
+from database.models import Repository, PullRequest, Commit, ChangedFile, PRMetrics, User
 
-# every route here does heavy DB work, so all of them require a logged-in user
-router = APIRouter(prefix="/metrics", tags=["metrics"], dependencies=[Depends(get_current_user)])
+# every route here rewrites stored metrics, so only accounts in ALLOWED_WRITERS may call it
+router = APIRouter(prefix="/metrics", tags=["metrics"], dependencies=[Depends(require_writer)])
 
 SENSITIVE_PATTERNS = ["auth", "login", "security", "payment", "migration", "password"]
 TEST_PATTERNS = ["test_", "_test", "/tests/", "spec_", "_spec"]
@@ -47,9 +47,11 @@ def compute_metrics_for_pr(pull_request: PullRequest, db: Session) -> PRMetrics:
 
 
 @router.post("/compute/{owner}/{repo}")
-def compute_metrics_for_repo(owner: str, repo: str, db: Session = Depends(get_db)):
+def compute_metrics_for_repo(owner: str, repo: str, db: Session = Depends(get_db),
+                             current_user: User = Depends(require_writer)):
+    # only the account that added the repository may recompute it
     repository = db.query(Repository).filter(
-        Repository.owner == owner, Repository.name == repo
+        Repository.owner == owner, Repository.name == repo, Repository.added_by == current_user.id
     ).first()
     if not repository:
         raise HTTPException(status_code=404, detail="Repository not found — ingest it first")

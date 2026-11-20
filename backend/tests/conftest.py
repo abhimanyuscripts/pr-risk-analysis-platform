@@ -34,11 +34,15 @@ os.environ.update(
     TOKEN_ENCRYPTION_KEY=Fernet.generate_key().decode(),
     GITHUB_CLIENT_ID="test-client-id",
     GITHUB_CLIENT_SECRET="test-client-secret",
-    GITHUB_REDIRECT_URI="http://localhost:8000/auth/callback",
+    GITHUB_REDIRECT_URI="http://localhost:8000/api/auth/callback",
     GITHUB_OAUTH_SCOPE="read:user",
     GEMINI_MODEL="test-model",
     FRONTEND_URL="http://localhost:5173",
     FRONTEND_ORIGINS="http://localhost:5173,http://localhost:3000",
+    APP_ENV="development",
+    ALLOWED_WRITERS="alice",      # tests that need another writer list set it with monkeypatch
+    PUBLIC_REPOS="",              # no public demo unless a test turns it on
+    STATIC_DIR=str(BACKEND / "tests" / "no-build-here"),  # tests that serve a build point this elsewhere
 )
 sys.path.insert(0, str(BACKEND))
 
@@ -49,6 +53,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 import main  # noqa: E402
 from auth.jwt_handler import create_access_token  # noqa: E402
 from database.connection import Base, engine  # noqa: E402
+from auth.encryption import encrypt_token  # noqa: E402
 from database.models import (ChangedFile, Commit, LLMAnalysis, PRLabel, PRMetrics,  # noqa: E402
                              PullRequest, Repository, User)
 
@@ -101,7 +106,7 @@ class Seed:
         self.db = db
 
     def user(self, name: str, github_id: int) -> User:
-        u = User(github_username=name, github_user_id=github_id)
+        u = User(github_username=name, github_user_id=github_id, github_access_token=encrypt_token(f"gho_{name}"))
         self.db.add(u)
         self.db.flush()
         return u
@@ -112,9 +117,10 @@ class Seed:
         self.db.flush()
         return r
 
-    def pr(self, repo: Repository, number: int, merged: datetime | None, state: str = "merged", **kw) -> PullRequest:
-        p = PullRequest(repository_id=repo.id, github_pr_number=number, title=f"PR {number}", author_username="dev",
-                        state=state, created_at=dt(2024, 1, 1), merged_at=merged, **kw)
+    def pr(self, repo: Repository, number: int, merged: datetime | None, state: str = "merged",
+           title: str | None = None, **kw) -> PullRequest:
+        p = PullRequest(repository_id=repo.id, github_pr_number=number, title=title or f"PR {number}",
+                        author_username="dev", state=state, created_at=dt(2024, 1, 1), merged_at=merged, **kw)
         self.db.add(p)
         self.db.flush()
         return p
@@ -135,6 +141,9 @@ class Seed:
     def file(self, pr: PullRequest, name: str, add: int, delete: int, patch: str | None = None) -> None:
         self.db.add(ChangedFile(pull_request_id=pr.id, filename=name, additions=add, deletions=delete,
                                 status="modified", patch=patch))
+
+    def commit(self, pr: PullRequest, sha: str, message: str, when: datetime | None = None) -> None:
+        self.db.add(Commit(pull_request_id=pr.id, sha=sha, message=message, author="dev", committed_at=when))
 
 
 @pytest.fixture
