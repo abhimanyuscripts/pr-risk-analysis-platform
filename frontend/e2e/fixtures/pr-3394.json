@@ -1,0 +1,201 @@
+{
+  "number": 3394,
+  "title": "Graceful upgrade path for 0.28.",
+  "description": "Suggested upgrade path for an upcoming 0.28 release...\r\n\r\nWe *do* have some backwards incompatible changes that we want to issue, but clearly need to minimise disruption to our userbase. Here's what we're currently looking at...\r\n\r\n---\r\n\r\n# Release Notes\r\n\r\nThe 0.28 release includes a limited set of backwards incompatible changes.\r\n\r\n## Backwards incompatible changes\r\n\r\nSSL configuration has been significantly simplified.\r\n\r\n* The `verify` argument no longer accepts string arguments for custom verify paths.\r\n* The `cert` argument has now been removed.\r\n* The `SSL_CERT_FILE` and `SSL_CERT_DIR` environment variables are no longer automatically used.\r\n\r\nFor users of the standard `verify=True` or `verify=False` cases this should require no changes.\r\n\r\nFor information on configuring more complex SSL cases, please see the [SSL documentation](https://github.com/encode/httpx/blob/graceful-upgrade-path/docs/advanced/ssl.md).\r\n\r\n## Other updates\r\n\r\n* The undocumented `URL.raw` property has now been deprecated, and will raise warnings. (#3394)\r\n* The deprecated `proxies` argument has now been removed. (#3319)\r\n* The deprecated `app` argument has now been removed. (#3319)\r\n* Ensure JSON request bodies are compact. (#3363)\r\n* Review URL percent escape sets, based on WHATWG spec. (#3371, #3373)\r\n* Ensure `certifi` and `httpcore` are only imported if required. (#3377)\r\n* Treat `socks5h` as a valid proxy scheme. (#3178)\r\n* Cleanup `Request()` method signature in line with `client.request()` and `httpx.request()`. (#3378)\r\n",
+  "author": "lovelydinosaur",
+  "state": "merged",
+  "base_branch": "master",
+  "head_branch": "graceful-upgrade-path",
+  "created_at": "2024-11-07T19:24:51+05:30",
+  "merged_at": "2024-11-12T17:01:42+05:30",
+  "github_url": "https://github.com/encode/httpx/pull/3394",
+  "metrics": {
+    "files_changed": 11,
+    "lines_added": 155,
+    "lines_deleted": 434,
+    "churn": 589,
+    "commit_count": 8,
+    "test_files_changed": 1,
+    "is_sensitive_file": false
+  },
+  "labels": [
+    {
+      "version": 3,
+      "is_risky": true,
+      "window_complete": true,
+      "window_days": 60,
+      "reasons": "corrective commit on touched file within window"
+    },
+    {
+      "version": 2,
+      "is_risky": true,
+      "window_complete": true,
+      "window_days": 60,
+      "reasons": "corrective commit on touched file within window"
+    },
+    {
+      "version": 1,
+      "is_risky": true,
+      "window_complete": true,
+      "window_days": 60,
+      "reasons": "corrective commit on touched file within window"
+    }
+  ],
+  "llm_analyses": [
+    {
+      "model": "gemini-3.5-flash-lite",
+      "prompt_version": 1,
+      "use_rag": true,
+      "risk_score": 75,
+      "risk_level": "high",
+      "summary": "The pull request implements breaking changes for the upcoming 0.28 release regarding SSL configuration. It removes features like string arguments for custom verify paths in `verify`, removes the `cert` argument entirely, and stops automatically using `SSL_CERT_FILE` and `SSL_CERT_DIR` environment variables. The diff is cut short, but touches core configuration, API signatures, client options, and documentation.",
+      "concerns": [
+        {
+          "category": "compatibility",
+          "file": "httpx/_config.py",
+          "explanation": "Removal of `verify=<str>`, `cert` argument, and environment variable support for SSL certs constitutes a major breaking change that may cause unexpected user disruption despite a graceful upgrade path attempt."
+        },
+        {
+          "category": "correctness",
+          "file": "httpx/_api.py",
+          "explanation": "Modifying high-level API entrypoints (`get`, `post`, `request`, etc.) to alter the `ssl_context` parameter back to `verify` requires careful signature alignment across all helper methods to avoid TypeError or missing arguments."
+        }
+      ],
+      "tests_included": true,
+      "diff_truncated": true,
+      "retrieved_docs": [
+        {
+          "heading": "docs/contributing.md > Contributing > Releasing",
+          "distance": 0.472
+        },
+        {
+          "heading": "docs/contributing.md > Contributing > Reporting Bugs or Other Issues",
+          "distance": 0.5202
+        },
+        {
+          "heading": "docs/api.md > Developer Interface > `URL`",
+          "distance": 0.5263
+        },
+        {
+          "heading": "docs/advanced.md > Advanced Usage > SSL certificates > Changing the verification defaults",
+          "distance": 0.5644
+        }
+      ],
+      "created_at": "2026-11-10T14:22:44.077468+05:30"
+    },
+    {
+      "model": "gemini-3.5-flash-lite",
+      "prompt_version": 1,
+      "use_rag": false,
+      "risk_score": 65,
+      "risk_level": "medium",
+      "summary": "The PR introduces major breaking changes for the upcoming 0.28 release, notably simplifying SSL configuration by removing string arguments for custom verify paths, removing the 'cert' argument, and disabling automatic use of 'SSL_CERT_FILE' and 'SSL_CERT_DIR' environment variables. Core files like httpx/_config.py, httpx/_api.py, and httpx/_client.py undergo heavy refactoring. The diff was cut short to fit the budget, but changes of this magnitude in protocol and configuration layers carry significant edge-case risks.",
+      "concerns": [
+        {
+          "category": "compatibility",
+          "file": "httpx/_config.py",
+          "explanation": "Removal of support for string arguments, cert parameters, and environment variables for SSL configuration will break backward compatibility for existing users upgrading to 0.28."
+        },
+        {
+          "category": "security",
+          "file": "httpx/_config.py",
+          "explanation": "Changes to default SSL context creation and environment variable handling (`SSL_CERT_FILE`, `SSL_CERT_DIR`) alter trust paths and behavior for secure connections."
+        },
+        {
+          "category": "correctness",
+          "file": "httpx/_api.py",
+          "explanation": "API signature updates removing deprecated verification and cert arguments across helper functions may cause unexpected keyword argument handling or regressions."
+        }
+      ],
+      "tests_included": true,
+      "diff_truncated": true,
+      "retrieved_docs": [],
+      "created_at": "2026-11-09T22:42:45.213956+05:30"
+    }
+  ],
+  "files": [
+    {
+      "filename": "docs/advanced/ssl.md",
+      "status": "modified",
+      "additions": 42,
+      "deletions": 140,
+      "has_diff": true
+    },
+    {
+      "filename": "httpx/_config.py",
+      "status": "modified",
+      "additions": 12,
+      "deletions": 100,
+      "has_diff": true
+    },
+    {
+      "filename": "httpx/_api.py",
+      "status": "modified",
+      "additions": 25,
+      "deletions": 66,
+      "has_diff": true
+    },
+    {
+      "filename": "httpx/_client.py",
+      "status": "modified",
+      "additions": 23,
+      "deletions": 60,
+      "has_diff": true
+    },
+    {
+      "filename": "tests/test_config.py",
+      "status": "modified",
+      "additions": 12,
+      "deletions": 33,
+      "has_diff": true
+    },
+    {
+      "filename": "httpx/_transports/default.py",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 19,
+      "has_diff": true
+    },
+    {
+      "filename": "CHANGELOG.md",
+      "status": "modified",
+      "additions": 16,
+      "deletions": 4,
+      "has_diff": true
+    },
+    {
+      "filename": "httpx/_urls.py",
+      "status": "modified",
+      "additions": 16,
+      "deletions": 0,
+      "has_diff": true
+    },
+    {
+      "filename": "docs/contributing.md",
+      "status": "modified",
+      "additions": 3,
+      "deletions": 6,
+      "has_diff": true
+    },
+    {
+      "filename": "httpx/_main.py",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 5,
+      "has_diff": true
+    },
+    {
+      "filename": "httpx/__init__.py",
+      "status": "modified",
+      "additions": 0,
+      "deletions": 1,
+      "has_diff": true
+    }
+  ],
+  "hybrid": {
+    "score": 99.1,
+    "size_percentile": 98.6,
+    "llm_percentile": 99.6,
+    "reference_prs": 390
+  }
+}
