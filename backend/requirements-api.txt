@@ -1,0 +1,15 @@
+# What the API itself needs (Phase 18): used by CI and the Docker image.
+# The LLM / RAG / ML batch scripts need the full requirements.txt (torch, transformers, ...),
+# which is several GB on Linux and is not needed to serve the API.
+# Versions match requirements.txt; keep them in step when upgrading.
+cryptography==50.0.1
+fastapi==0.141.1
+httpx==0.28.1
+numpy==2.5.4
+pgvector==0.5.1
+psycopg[binary]==3.3.5
+pydantic==2.13.5
+python-dotenv==1.2.3
+python-jose==3.5.0
+SQLAlchemy==2.0.52
+uvicorn==0.52.4

@@ -1,3 +1,6 @@
-# Tools for development and tests only (not needed to run the API).
--r requirements.txt
+# For tests (Phase 17). Builds on the light API list; httpx2 is what the test client uses, pandas is used by the hybrid test
+# (research/hybrid_rules.py). Run tests with the full requirements.txt installed works too.
+-r requirements-api.txt
+httpx2==2.16.0
+pandas==3.1.0
 pytest==9.2.0
