@@ -11,6 +11,7 @@ from database.connection import get_db
 from routes.github import router as github_router
 from routes.metrics import router as metrics_router
 from routes.labels import router as labels_router
+from routes.repos import router as repos_router
 
 
 app = FastAPI()
@@ -30,6 +31,7 @@ app.include_router(auth_router)
 app.include_router(github_router)
 app.include_router(metrics_router)
 app.include_router(labels_router)
+app.include_router(repos_router)
 
 @app.get("/")
 def read_root():
