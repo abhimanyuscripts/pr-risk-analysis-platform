@@ -13,10 +13,10 @@ __pycache__/
 venv/
 env/
 
-# Node / Next.js
+# Node / React (Vite)
 node_modules/
-.next/
-out/
+dist/
+.vite/
 npm-debug.log*
 
 # macOS
