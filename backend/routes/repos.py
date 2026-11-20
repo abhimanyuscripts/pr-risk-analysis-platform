@@ -9,13 +9,14 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
 from auth.dependencies import get_current_user
 from database.connection import get_db
 from database.models import ChangedFile, LLMAnalysis, PRLabel, PRMetrics, PullRequest, Repository, User
 from llm.prompt import PROMPT_VERSION
+from scoring import hybrid_subquery
 
 router = APIRouter(prefix="/repos", tags=["repos"])
 
@@ -48,6 +49,23 @@ class LLMOut(BaseModel):
     use_rag: bool
 
 
+class HybridOut(BaseModel):
+    """Phase 15's hybrid for one PR, on a 0-100 scale. EXPERIMENTAL: in Phase 15 it beat the size rule
+    by only +0.039 ROC-AUC (95% +0.002 to +0.076), so show it next to its two parts, never alone."""
+    score: float            # average of the two percentiles below
+    size_percentile: float  # % of reference PRs this PR's churn is at or above (ties share)
+    llm_percentile: float   # same for the LLM+RAG risk score
+    reference_prs: int      # how many PRs the percentiles are measured against
+
+
+def hybrid_out(size_pct, llm_pct, n) -> "HybridOut | None":
+    if size_pct is None:  # PR is not in the reference: no LLM answer or no metrics yet
+        return None
+    size, llm = float(size_pct) * 100, float(llm_pct) * 100
+    return HybridOut(score=round((size + llm) / 2, 1), size_percentile=round(size, 1),
+                     llm_percentile=round(llm, 1), reference_prs=int(n))
+
+
 class PRListItem(BaseModel):
     number: int
     title: str
@@ -58,6 +76,7 @@ class PRListItem(BaseModel):
     churn: int | None
     label: LabelOut | None  # None = this label version was never computed for the PR
     llm: LLMOut | None      # None = no stored LLM answer yet
+    hybrid: HybridOut | None  # None = not in the reference (needs both churn and the research LLM answer)
 
 
 class PRListOut(BaseModel):
@@ -128,6 +147,7 @@ class PRDetailOut(BaseModel):
     github_url: str
     metrics: MetricsOut | None
     labels: list[LabelDetail]  # every computed version, newest version first
+    hybrid: HybridOut | None
     llm_analyses: list[LLMDetail]  # the research model's RAG answer first, then the rest
     files: list[FileOut]  # biggest change first
 
@@ -178,7 +198,7 @@ def list_repos(db: Session = Depends(get_db), current_user: User = Depends(get_c
 def list_prs(
     owner: str,
     repo: str,
-    sort: Literal["merged_at", "churn", "llm_score"] = "merged_at",
+    sort: Literal["merged_at", "churn", "llm_score", "hybrid"] = "merged_at",
     desc: bool = True,
     risky: bool | None = Query(None, description="Only PRs whose label says risky (true) or not (false)"),
     label_version: int = Query(DEFAULT_LABEL_VERSION, ge=1),
@@ -192,6 +212,7 @@ def list_prs(
 
     label = aliased(PRLabel)
     llm = aliased(LLMAnalysis)
+    hyb = hybrid_subquery(repository.id, LLM_MODEL, PROMPT_VERSION)
     # Each join matches at most one row per PR (metrics, label per version, and one LLM answer per
     # model + prompt version + RAG setting are all unique in the schema), so the page never gets
     # duplicate PRs. Outer joins keep PRs that have no label or no LLM answer yet.
@@ -201,16 +222,18 @@ def list_prs(
         .outerjoin(label, (label.pull_request_id == PullRequest.id) & (label.label_version == label_version))
         .outerjoin(llm, (llm.pull_request_id == PullRequest.id) & (llm.model == LLM_MODEL)
                    & (llm.prompt_version == PROMPT_VERSION) & llm.use_rag.is_(True))
+        .outerjoin(hyb, hyb.c.pr_id == PullRequest.id)
         .filter(PullRequest.repository_id == repository.id)
     )
     if risky is not None:
         base = base.filter(label.is_risky == risky)
     total = base.count()
 
-    column = {"merged_at": PullRequest.merged_at, "churn": PRMetrics.churn, "llm_score": llm.risk_score}[sort]
+    column = {"merged_at": PullRequest.merged_at, "churn": PRMetrics.churn, "llm_score": llm.risk_score,
+              "hybrid": hyb.c.size_pct + hyb.c.llm_pct}[sort]
     ordering = column.desc().nulls_last() if desc else column.asc().nulls_last()
     rows = (
-        base.with_entities(PullRequest, PRMetrics, label, llm)
+        base.with_entities(PullRequest, PRMetrics, label, llm, hyb.c.size_pct, hyb.c.llm_pct, hyb.c.n)
         .order_by(ordering, PullRequest.github_pr_number.desc())  # PR number breaks ties, so paging is stable
         .limit(limit).offset(offset).all()
     )
@@ -222,8 +245,9 @@ def list_prs(
             label=LabelOut(version=lab.label_version, is_risky=lab.is_risky,
                            window_complete=lab.window_complete) if lab else None,
             llm=LLMOut(risk_score=a.risk_score, risk_level=a.risk_level, use_rag=a.use_rag) if a else None,
+            hybrid=hybrid_out(sp, lp, n),
         )
-        for pr, m, lab, a in rows
+        for pr, m, lab, a, sp, lp, n in rows
     ]
     return PRListOut(total=total, limit=limit, offset=offset, items=items)
 
@@ -246,6 +270,8 @@ def get_pr(owner: str, repo: str, number: int, db: Session = Depends(get_db),
     # the answer the dashboard headlines (research model, current prompt, RAG) comes first
     analyses.sort(key=lambda a: (not (a.model == LLM_MODEL and a.prompt_version == PROMPT_VERSION and a.use_rag),
                                  a.model, -a.prompt_version, not a.use_rag))
+    hyb = hybrid_subquery(repository.id, LLM_MODEL, PROMPT_VERSION)
+    h = db.execute(select(hyb.c.size_pct, hyb.c.llm_pct, hyb.c.n).where(hyb.c.pr_id == pr.id)).first()
     files = (db.query(ChangedFile).filter(ChangedFile.pull_request_id == pr.id)
              .order_by((ChangedFile.additions + ChangedFile.deletions).desc(), ChangedFile.filename).all())
 
@@ -274,6 +300,7 @@ def get_pr(owner: str, repo: str, number: int, db: Session = Depends(get_db),
                            is_sensitive_file=m.is_sensitive_file) if m else None,
         labels=[LabelDetail(version=lab.label_version, is_risky=lab.is_risky, window_complete=lab.window_complete,
                             window_days=lab.label_window_days, reasons=lab.reasons) for lab in labels],
+        hybrid=hybrid_out(*h) if h else None,
         llm_analyses=[llm_detail(a) for a in analyses],
         files=[FileOut(filename=f.filename, status=f.status, additions=f.additions, deletions=f.deletions,
                        has_diff=f.patch is not None) for f in files],
