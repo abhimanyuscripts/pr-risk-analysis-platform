@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from database.models import Commit
 from database.connection import get_db
 from database.models import User
-from auth.dependencies import get_current_user, get_github_token
+from auth.dependencies import get_github_token, require_writer
 from database.models import Repository, PullRequest
 from database.models import ChangedFile
 
@@ -128,7 +128,7 @@ async def list_pull_requests(
 async def ingest_repository(
     owner: str,
     repo: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_writer),
     token: str = Depends(get_github_token),
     db: Session = Depends(get_db),
 ):
@@ -141,6 +141,12 @@ async def ingest_repository(
             raise HTTPException(status_code=502, detail="Failed to fetch repository from GitHub")
         repo_data = repo_response.json()
 
+        # checked before the long PR download: updating a repository another account added would
+        # change data that account owns (and may have made public)
+        repository = db.query(Repository).filter(Repository.github_repo_id == repo_data["id"]).first()
+        if repository and repository.added_by != current_user.id:
+            raise HTTPException(status_code=409, detail="This repository was added by another account")
+
         prs_data = await fetch_all_pages(
             client,
             f"https://api.github.com/repos/{owner}/{repo}/pulls",
@@ -151,7 +157,6 @@ async def ingest_repository(
             raise HTTPException(status_code=502, detail="Failed to fetch pull requests from GitHub")
 
         # --- Upsert the repository ---
-        repository = db.query(Repository).filter(Repository.github_repo_id == repo_data["id"]).first()
         if not repository:
             repository = Repository(
                 added_by=current_user.id,
@@ -300,7 +305,7 @@ async def ingest_patches(
     owner: str,
     repo: str,
     merged_since: date,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_writer),
     token: str = Depends(get_github_token),
     db: Session = Depends(get_db),
 ):
@@ -311,7 +316,9 @@ async def ingest_patches(
     patch column for a date range instead of re-ingesting the whole repository.
     Safe to re-run: it overwrites the same patch values.
     """
-    repository = db.query(Repository).filter(Repository.owner == owner, Repository.name == repo).first()
+    repository = db.query(Repository).filter(
+        Repository.owner == owner, Repository.name == repo, Repository.added_by == current_user.id
+    ).first()
     if not repository:
         raise HTTPException(status_code=404, detail="Repository not found — ingest it first")
 

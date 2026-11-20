@@ -1,4 +1,5 @@
 # Phase 18: runs both test suites on every pull request and on every push to main.
+# Phase 19 added the Docker job: it builds the same image Render runs and starts it in production mode.
 # A red cross on a PR means something broke; GitHub shows which step and why.
 name: CI
 
@@ -71,7 +72,7 @@ jobs:
       - run: npm run lint
       - run: npm run build # also type-checks with tsc
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npm run test:e2e # includes the axe accessibility checks (e2e/a11y.spec.ts)
       # If a browser test fails, keep its trace so it can be replayed with `npx playwright show-trace`
       - if: failure()
         uses: actions/upload-artifact@v7
@@ -79,3 +80,54 @@ jobs:
           name: playwright-traces
           path: frontend/test-results/
           retention-days: 7
+
+  docker:
+    name: Docker image (build, start in production mode, check the site)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # An empty database with pgvector, like a new Neon project: the image must start and answer anyway
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: pr_risk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d pr_risk"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker build --tag pr-risk .
+      # Fresh throwaway secrets: production mode refuses to start with weak ones (backend/settings.py)
+      - name: Start the image as Render would
+        run: |
+          docker run --detach --name app --network host \
+            --env APP_ENV=production \
+            --env PORT=8000 \
+            --env DATABASE_URL=postgresql://ci:ci@localhost:5432/pr_risk \
+            --env JWT_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+            --env TOKEN_ENCRYPTION_KEY="$(python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" \
+            --env GITHUB_CLIENT_ID=ci --env GITHUB_CLIENT_SECRET=ci \
+            --env GITHUB_REDIRECT_URI=https://ci.example/api/auth/callback \
+            --env FRONTEND_URL=https://ci.example \
+            pr-risk
+      - name: Check the site answers
+        run: |
+          for _ in $(seq 1 30); do curl -fsS http://localhost:8000/api/health && break; sleep 2; done
+          curl -fsS http://localhost:8000/api/health
+          curl -fsS http://localhost:8000/ -o index.html
+          grep -q '<div id="root">' index.html
+          curl -fsS http://localhost:8000/repos/encode/httpx -o page.html
+          grep -q '<div id="root">' page.html
+          asset=$(grep -o '/assets/index-[^"]*\.js' index.html | head -n 1)
+          curl -fsS -D headers.txt -o /dev/null "http://localhost:8000$asset"
+          grep -qi 'immutable' headers.txt
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/nope)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/labels/compute/a/b)" = 401
+      - if: failure()
+        run: docker logs app

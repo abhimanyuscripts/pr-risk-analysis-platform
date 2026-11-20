@@ -3,7 +3,7 @@ import pytest
 
 from tests.conftest import MODEL, auth, dt
 
-PRS = "/repos/encode/httpx/prs"
+PRS = "/api/repos/encode/httpx/prs"
 
 
 def numbers(response):
@@ -13,12 +13,12 @@ def numbers(response):
 # ---- GET /repos ----
 
 def test_repo_list_shows_only_your_repos_with_counts(client, world):
-    body = client.get("/repos", headers=auth(world["a"])).json()
+    body = client.get("/api/repos", headers=auth(world["a"])).json()
     assert [r["full_name"] for r in body] == ["encode/httpx"]
     r = body[0]
     # 6 PRs have at least one stored answer, whatever the model or RAG setting
     assert (r["pr_count"], r["llm_analyzed_count"], r["last_merged_at"][:10]) == (7, 6, "2024-06-01")
-    other = client.get("/repos", headers=auth(world["b"])).json()
+    other = client.get("/api/repos", headers=auth(world["b"])).json()
     assert [(x["full_name"], x["pr_count"], x["llm_analyzed_count"]) for x in other] == [("acme/secret", 1, 0)]
 
 
@@ -65,14 +65,16 @@ def test_pr_list_fields(client, world):
 
 def test_other_users_repo_is_404_not_403(client, world):
     assert client.get(PRS, headers=auth(world["b"])).status_code == 404
-    assert client.get("/repos/acme/secret/prs", headers=auth(world["a"])).status_code == 404
-    assert client.get("/repos/nope/nope/prs", headers=auth(world["a"])).status_code == 404
+    assert client.get("/api/repos/acme/secret/prs", headers=auth(world["a"])).status_code == 404
+    assert client.get("/api/repos/nope/nope/prs", headers=auth(world["a"])).status_code == 404
 
 
-def test_login_required(client, world):
-    assert client.get("/repos").status_code == 401
-    assert client.get(PRS).status_code == 401
-    assert client.get(PRS + "/2").status_code == 401
+def test_visitors_see_no_private_repo(client, world):
+    """Without PUBLIC_REPOS nothing is public: a visitor gets an empty list and 404s, not 401s,
+    so the API does not even confirm that a private repository exists."""
+    assert client.get("/api/repos").json() == []
+    for path in (PRS, PRS + "/2", "/api/repos/encode/httpx/score-map"):
+        assert client.get(path).status_code == 404
 
 
 @pytest.mark.parametrize("query", ["?limit=0", "?limit=201", "?offset=-1", "?sort=bogus"])

@@ -14,7 +14,7 @@ export default defineConfig({
     launchOptions: process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  // Tests run against the production build, served on the port the backend allows (5173).
+  // Tests run against the production build (vite preview on 5173); /api never reaches a backend.
   webServer: {
     command: 'npm run build && npx vite preview --port 5173 --strictPort',
     url: 'http://localhost:5173',

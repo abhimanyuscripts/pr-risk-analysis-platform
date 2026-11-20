@@ -1,6 +1,8 @@
 // The shapes the backend returns (backend/routes/repos.py). Keep the two in step.
 
 export interface Repo {
+  is_public: boolean // the showcase repo anyone can open, without logging in
+  is_owner: boolean // the logged-in user ingested it
   owner: string
   name: string
   full_name: string
@@ -64,9 +66,24 @@ export interface Metrics {
   is_sensitive_file: boolean
 }
 
+/** Which later PR made a label risky (hindsight). Filled by the labelling step; older labels have none. */
+/** The later pull requests that made a label risky (first revert, first fix, in merge order). */
+export interface LabelEvidence {
+  revert: { number: number; title: string; merged_at: string } | null
+  fix: {
+    number: number
+    title: string
+    merged_at: string
+    commit_sha: string
+    commit_message: string // first line only
+    files: string[] // files both pull requests changed
+  } | null
+}
+
 export interface LabelDetail extends Label {
   window_days: number
   reasons: string | null
+  evidence: LabelEvidence | null
 }
 
 export interface Concern {
@@ -113,4 +130,19 @@ export interface PRDetail {
   labels: LabelDetail[]
   llm_analyses: LLMAnalysis[]
   files: ChangedFile[]
+}
+
+/** One analysed PR on the risk map (GET /repos/{owner}/{repo}/score-map). */
+export interface MapPoint {
+  number: number
+  title: string
+  size_percentile: number
+  llm_percentile: number
+  score: number
+  hindsight: 'fix' | 'no_fix' | 'pending' | null
+}
+
+export interface ScoreMap {
+  reference_prs: number
+  points: MapPoint[]
 }

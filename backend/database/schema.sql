@@ -143,3 +143,8 @@ CREATE INDEX idx_document_chunks_document_id ON document_chunks(document_id);
 
 -- Phase 14: which doc chunks a RAG answer was given (NULL for non-RAG answers).
 ALTER TABLE llm_analyses ADD COLUMN retrieved_chunks JSONB;
+
+-- Phase 19: the later PR (and commit) that made a label risky, so the dashboard can link to it.
+-- {"revert": {...} | null, "fix": {...} | null}; NULL when the label is not risky.
+-- An existing database gets this from `python -m database.migrate` instead.
+ALTER TABLE pr_labels ADD COLUMN evidence JSONB;

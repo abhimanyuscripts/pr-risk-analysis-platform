@@ -21,41 +21,41 @@ def alice(seed, db):
 # ---- Bearer token ----
 
 def test_no_header_is_401(client):
-    r = client.get("/users/me")
+    r = client.get("/api/users/me")
     assert r.status_code == 401
     assert r.json()["detail"] == "Missing or invalid authorization header"
 
 
 def test_garbage_token_is_401(client):
-    r = client.get("/users/me", headers={"Authorization": "Bearer garbage"})
+    r = client.get("/api/users/me", headers={"Authorization": "Bearer garbage"})
     assert r.status_code == 401
     assert r.json()["detail"] == "Invalid or expired token"
 
 
 def test_wrong_scheme_is_401(client, alice):
     token = auth(alice)["Authorization"].split()[1]
-    assert client.get("/users/me", headers={"Authorization": f"Basic {token}"}).status_code == 401
+    assert client.get("/api/users/me", headers={"Authorization": f"Basic {token}"}).status_code == 401
 
 
 def test_valid_token_returns_the_user(client, alice):
-    r = client.get("/users/me", headers=auth(alice))
+    r = client.get("/api/users/me", headers=auth(alice))
     assert r.status_code == 200
     assert r.json() == {"github_username": "alice", "user_id": str(alice.id)}
 
 
 def test_lowercase_bearer_is_accepted(client, alice):
     token = auth(alice)["Authorization"].split()[1]
-    assert client.get("/users/me", headers={"Authorization": f"bearer {token}"}).status_code == 200
+    assert client.get("/api/users/me", headers={"Authorization": f"bearer {token}"}).status_code == 200
 
 
 def test_router_level_protection_still_applies(client):
-    assert client.post("/metrics/compute/a/b").status_code == 401
+    assert client.post("/api/metrics/compute/a/b").status_code == 401
 
 
 def test_swagger_gets_an_authorize_button(client):
     spec = main.app.openapi()
     assert spec["components"]["securitySchemes"]["HTTPBearer"] == {"type": "http", "scheme": "bearer"}
-    assert spec["paths"]["/users/me"]["get"].get("security")
+    assert spec["paths"]["/api/users/me"]["get"].get("security")
 
 
 # ---- CORS ----
@@ -65,13 +65,13 @@ PREFLIGHT = {"Access-Control-Request-Method": "GET", "Access-Control-Request-Hea
 
 @pytest.mark.parametrize("origin", ["http://localhost:5173", "http://localhost:3000"])
 def test_cors_allows_the_frontend(client, origin):
-    r = client.options("/users/me", headers={**PREFLIGHT, "Origin": origin})
+    r = client.options("/api/users/me", headers={**PREFLIGHT, "Origin": origin})
     assert r.status_code == 200
     assert r.headers["access-control-allow-origin"] == origin
 
 
 def test_cors_refuses_other_sites(client):
-    r = client.options("/users/me", headers={**PREFLIGHT, "Origin": "https://evil.example"})
+    r = client.options("/api/users/me", headers={**PREFLIGHT, "Origin": "https://evil.example"})
     assert "access-control-allow-origin" not in r.headers
 
 
@@ -113,7 +113,7 @@ def _state(response) -> str:
 
 
 def test_app_login_goes_to_github_and_marks_the_app(login_client):
-    r = login_client.get("/auth/login?app=true")
+    r = login_client.get("/api/auth/login?app=true")
     assert r.status_code == 307
     assert r.headers["location"].startswith("https://github.com/login/oauth/authorize")
     cookies = r.headers.get_list("set-cookie")
@@ -122,8 +122,8 @@ def test_app_login_goes_to_github_and_marks_the_app(login_client):
 
 
 def test_app_login_returns_to_the_app_with_the_token_after_hash(login_client, db):
-    state = _state(login_client.get("/auth/login?app=true"))
-    r = login_client.get(f"/auth/callback?code=abc&state={state}")
+    state = _state(login_client.get("/api/auth/login?app=true"))
+    r = login_client.get(f"/api/auth/callback?code=abc&state={state}")
     location = r.headers["location"]
     assert r.status_code == 307
     assert location.startswith("http://localhost:5173/auth/done#token=")
@@ -136,14 +136,14 @@ def test_app_login_returns_to_the_app_with_the_token_after_hash(login_client, db
 
 
 def test_plain_login_still_returns_json_for_swagger(login_client):
-    r = login_client.get("/auth/login")
+    r = login_client.get("/api/auth/login")
     assert not any(c.startswith("login_target=app") for c in r.headers.get_list("set-cookie"))
-    r = login_client.get(f"/auth/callback?code=abc&state={_state(r)}")
+    r = login_client.get(f"/api/auth/callback?code=abc&state={_state(r)}")
     assert r.status_code == 200
     assert r.json()["github_username"] == "alice"
     assert decode_access_token(r.json()["access_token"])
 
 
 def test_wrong_state_is_refused(login_client):
-    login_client.get("/auth/login")
-    assert login_client.get("/auth/callback?code=abc&state=wrong").status_code == 400
+    login_client.get("/api/auth/login")
+    assert login_client.get("/api/auth/callback?code=abc&state=wrong").status_code == 400

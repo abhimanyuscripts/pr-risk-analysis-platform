@@ -1,15 +1,16 @@
-// A stand-in for the FastAPI backend: same paths and response shapes, fixed data.
-// Requests to http://localhost:8000 never leave the browser; this file answers them.
+// A stand-in for the FastAPI backend: same paths (/api/...), response shapes and access rules, fixed data.
+// Requests to /api never leave the browser; this file answers them.
+//   - encode/httpx is the public demo: anyone may read it.
+//   - abhimanyuscripts/pr-risk-analysis-platform is private to the logged-in user.
+//   - A token other than GOOD_TOKEN is "expired": every endpoint answers 401 to it, like the real API.
 import type { Page, Route } from '@playwright/test'
 import pr3394 from './fixtures/pr-3394.json' with { type: 'json' }
+import realMap from './fixtures/score-map-httpx.json' with { type: 'json' }
 
-export const API = 'http://localhost:8000'
 export const GOOD_TOKEN = 'good-token'
 
-const REPOS = [
-  { owner: 'encode', name: 'httpx', full_name: 'encode/httpx', pr_count: 1805, last_merged_at: '2026-02-23T16:10:42+05:30', llm_analyzed_count: 390 },
-  { owner: 'abhimanyuscripts', name: 'pr-risk-analysis-platform', full_name: 'abhimanyuscripts/pr-risk-analysis-platform', pr_count: 17, last_merged_at: '2026-09-28T10:58:29+05:30', llm_analyzed_count: 0 },
-]
+const DEMO = { owner: 'encode', name: 'httpx', full_name: 'encode/httpx', pr_count: 1805, last_merged_at: '2026-02-23T16:10:42+05:30', llm_analyzed_count: 390, is_public: true }
+const PRIVATE = { owner: 'abhimanyuscripts', name: 'pr-risk-analysis-platform', full_name: 'abhimanyuscripts/pr-risk-analysis-platform', pr_count: 17, last_merged_at: '2026-09-28T10:58:29+05:30', llm_analyzed_count: 0, is_public: false }
 
 /** 120 PRs. Every 4th has no LLM answer (so no hybrid); PR 3005 is "pending", 3007 is open, 3009 has no label. */
 export const PRS = Array.from({ length: 120 }, (_, i) => {
@@ -31,6 +32,12 @@ export const PRS = Array.from({ length: 120 }, (_, i) => {
   }
 })
 
+/** The real encode/httpx risk map, saved from the API: 390 PRs with their percentiles and hindsight. */
+export const MAP = realMap as {
+  reference_prs: number
+  points: { number: number; title: string; size_percentile: number; llm_percentile: number; score: number; hindsight: 'fix' | 'no_fix' | 'pending' | null }[]
+}
+
 type PR = (typeof PRS)[number]
 const SORT_KEYS: Record<string, (p: PR) => number | string | null> = {
   hybrid: (p) => p.hybrid?.score ?? null,
@@ -51,29 +58,52 @@ const DETAILS: Record<string, unknown> = {
 export interface MockApi {
   /** Query strings the app sent to the PR list endpoint, oldest first. */
   prListQueries: URLSearchParams[]
+  /** Every API path the app asked for, with whether it sent a token. */
+  requests: { path: string; token: string | null }[]
 }
 
-export async function mockApi(page: Page): Promise<MockApi> {
-  const state: MockApi = { prListQueries: [] }
-  const json = (route: Route, status: number, body: unknown) =>
-    route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) })
+export interface MockOptions {
+  /** Make the start page's risk map fail, to check the page still works. */
+  scoreMapFails?: boolean
+  /** Answer /users/me late, so page requests go out while an expired token is still stored. */
+  slowSession?: boolean
+}
 
-  await page.route(`${API}/**`, async (route) => {
+export async function mockApi(page: Page, options: MockOptions = {}): Promise<MockApi> {
+  const state: MockApi = { prListQueries: [], requests: [] }
+  const json = (route: Route, status: number, body: unknown) =>
+    route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+
+  await page.route('**/api/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
-    if (request.method() === 'OPTIONS') {
-      return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization' } })
-    }
+    const path = url.pathname.replace(/^\/api/, '')
+    const token = request.headers()['authorization']?.replace(/^Bearer /, '') ?? null
+    state.requests.push({ path, token })
+
     // Login: the real backend sends the browser to GitHub and back; here we jump straight back.
-    if (url.pathname === '/auth/login' && url.searchParams.get('app') === 'true') {
-      return route.fulfill({ status: 302, headers: { location: `http://localhost:5173/auth/done#token=${GOOD_TOKEN}` } })
+    if (path === '/auth/login' && url.searchParams.get('app') === 'true') {
+      return route.fulfill({ status: 302, headers: { location: `${url.origin}/auth/done#token=${GOOD_TOKEN}` } })
     }
-    if (request.headers()['authorization'] !== `Bearer ${GOOD_TOKEN}`) {
-      return json(route, 401, { detail: 'Invalid or expired token' })
+    if (path === '/users/me' && options.slowSession) await new Promise((resolve) => setTimeout(resolve, 1500))
+    if (token !== null && token !== GOOD_TOKEN) return json(route, 401, { detail: 'Invalid or expired token' })
+    const loggedIn = token === GOOD_TOKEN
+
+    if (path === '/users/me') {
+      return loggedIn ? json(route, 200, { github_username: 'abhimanyuscripts', user_id: 'u1' }) : json(route, 401, { detail: 'Missing or invalid authorization header' })
     }
-    if (url.pathname === '/users/me') return json(route, 200, { github_username: 'abhimanyuscripts', user_id: 'u1' })
-    if (url.pathname === '/repos') return json(route, 200, REPOS)
-    if (url.pathname === '/repos/encode/httpx/prs') {
+    if (path === '/repos') {
+      return json(route, 200, loggedIn ? [{ ...DEMO, is_owner: true }, { ...PRIVATE, is_owner: true }] : [{ ...DEMO, is_owner: false }])
+    }
+    if (path.startsWith('/repos/abhimanyuscripts/pr-risk-analysis-platform')) {
+      if (!loggedIn) return json(route, 404, { detail: 'Repository not found' })
+      if (path.endsWith('/score-map')) return json(route, 200, { reference_prs: 0, points: [] })
+      if (path.endsWith('/prs')) return json(route, 200, { total: 0, limit: 50, offset: 0, items: [] })
+    }
+    if (path === '/repos/encode/httpx/score-map') {
+      return options.scoreMapFails ? json(route, 500, { detail: 'Internal Server Error' }) : json(route, 200, MAP)
+    }
+    if (path === '/repos/encode/httpx/prs') {
       const q = url.searchParams
       state.prListQueries.push(q)
       const key = SORT_KEYS[q.get('sort') ?? 'merged_at']
@@ -86,12 +116,12 @@ export async function mockApi(page: Page): Promise<MockApi> {
       const limit = Number(q.get('limit') ?? 50)
       return json(route, 200, { total: ordered.length, limit, offset, items: ordered.slice(offset, offset + limit) })
     }
-    const detail = url.pathname.match(/^\/repos\/encode\/httpx\/prs\/(\d+)$/)
+    const detail = path.match(/^\/repos\/encode\/httpx\/prs\/(\d+)$/)
     if (detail) {
       const body = DETAILS[detail[1]]
       return body ? json(route, 200, body) : json(route, 404, { detail: 'Pull request not found' })
     }
-    return json(route, 404, { detail: 'Not found' })
+    return json(route, 404, { detail: 'Repository not found' })
   })
   return state
 }

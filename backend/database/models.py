@@ -119,6 +119,8 @@ class PRLabel(Base):
     labeled_at = Column(DateTime(timezone=True))
     label_version = Column(Integer, nullable=False, default=1)
     window_complete = Column(Boolean, nullable=False, default=True)
+    # Which later PR made it risky (Phase 19): {"revert": {...} | null, "fix": {...} | null}; null if not risky
+    evidence = Column(JSONB)
 
     __table_args__ = (UniqueConstraint("pull_request_id", "label_version", name="pr_labels_pr_version_key"),)
 

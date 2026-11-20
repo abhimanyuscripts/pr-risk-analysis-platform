@@ -1,1 +1,40 @@
 @import "tailwindcss";
+
+/* Design tokens (Phase 16 redesign). Cool paper, navy ink; red is reserved for "a fix followed".
+   Rule: model predictions are drawn filled, hindsight labels only as outlines. */
+@theme {
+  --font-sans: "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  --color-paper: #eef1f5;
+  --color-surface: #ffffff;
+  --color-ink: #14213d;
+  --color-graphite: #5b6474;
+  --color-rule: #d5dae1;
+  --color-signal: #2f5bea;
+  --color-fix: #b42318;
+  --color-amber: #8a5108;
+  --color-calm: #3f6f5e;
+}
+
+html {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+@keyframes plot-in {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: scale(1); }
+}

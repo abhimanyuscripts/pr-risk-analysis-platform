@@ -1,22 +1,24 @@
 """Phase 16a: read-only endpoints for the dashboard.
 
-They serve only what is already stored (nothing here calls GitHub or the LLM), and a user
-only sees repositories they added themselves, so a private repo never leaks to another login.
+They serve only what is already stored (nothing here calls GitHub or the LLM). A repository is
+visible to the account that added it, and to everyone (no login needed) if it is listed in
+PUBLIC_REPOS: the demo. Any other repository answers 404, so a private repo never leaks.
 """
 import os
 from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import func, select
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from auth.dependencies import get_current_user
+from auth.dependencies import get_optional_user
 from database.connection import get_db
 from database.models import ChangedFile, LLMAnalysis, PRLabel, PRMetrics, PullRequest, Repository, User
 from llm.prompt import PROMPT_VERSION
 from scoring import hybrid_subquery
+from settings import public_repos
 
 router = APIRouter(prefix="/repos", tags=["repos"])
 
@@ -35,6 +37,8 @@ class RepoOut(BaseModel):
     pr_count: int
     last_merged_at: datetime | None
     llm_analyzed_count: int  # PRs that have at least one stored LLM answer
+    is_public: bool  # in PUBLIC_REPOS: anyone can read it
+    is_owner: bool   # the logged-in account added it
 
 
 class LabelOut(BaseModel):
@@ -96,9 +100,37 @@ class MetricsOut(BaseModel):
     is_sensitive_file: bool
 
 
+class EvidencePR(BaseModel):
+    number: int
+    title: str
+    merged_at: datetime
+
+
+class FixEvidence(EvidencePR):
+    commit_sha: str
+    commit_message: str  # first line only
+    files: list[str]     # files both PRs changed (counted by this label version's rules)
+
+
+class LabelEvidence(BaseModel):
+    """The later PRs that made the label risky: the first revert and the first fix in merge order."""
+    revert: EvidencePR | None
+    fix: FixEvidence | None
+
+
+def evidence_out(raw) -> "LabelEvidence | None":
+    if not raw:  # not risky, or computed before Phase 19 stored evidence
+        return None
+    try:
+        return LabelEvidence.model_validate(raw)
+    except ValidationError:
+        return None
+
+
 class LabelDetail(LabelOut):
     window_days: int
     reasons: str | None  # why it was labelled risky; this is hindsight, not something known at merge time
+    evidence: LabelEvidence | None  # None = not risky, or labelled before evidence was recorded
 
 
 class ConcernOut(BaseModel):
@@ -134,6 +166,20 @@ class FileOut(BaseModel):
     has_diff: bool  # the diff itself is not sent: it can be very large
 
 
+class MapPoint(BaseModel):
+    number: int
+    title: str
+    size_percentile: float
+    llm_percentile: float
+    score: float  # the hybrid: average of the two percentiles
+    hindsight: Literal["fix", "no_fix", "pending"] | None  # None = no label of this version
+
+
+class ScoreMapOut(BaseModel):
+    reference_prs: int
+    points: list[MapPoint]
+
+
 class PRDetailOut(BaseModel):
     number: int
     title: str
@@ -154,26 +200,41 @@ class PRDetailOut(BaseModel):
 
 # ---- helpers ----
 
-def get_own_repo(db: Session, user: User, owner: str, repo: str) -> Repository:
-    """The repo, but only if this user added it. Someone else's repo answers 404, the same
-    as a repo that does not exist, so the API never confirms that a private repo is there."""
+def visible_to(user: User | None):
+    """SQL condition: repositories this visitor may read (the public ones, plus their own)."""
+    public = func.lower(Repository.full_name).in_(sorted(public_repos())) if public_repos() else false()
+    return or_(public, Repository.added_by == user.id) if user else public
+
+
+def get_visible_repo(db: Session, user: User | None, owner: str, repo: str) -> Repository:
+    """The repo, if it is public or this user added it. Anything else answers 404, the same as a
+    repo that does not exist, so the API never confirms that a private repo is there."""
     repository = db.query(Repository).filter(
-        Repository.owner == owner, Repository.name == repo, Repository.added_by == user.id
+        Repository.owner == owner, Repository.name == repo, visible_to(user)
     ).first()
     if not repository:
         raise HTTPException(status_code=404, detail="Repository not found")
     return repository
 
 
+def hindsight(label: PRLabel | None) -> str | None:
+    if label is None:
+        return None
+    if not label.window_complete:
+        return "pending"
+    return "fix" if label.is_risky else "no_fix"
+
+
 # ---- endpoints ----
 
 @router.get("", response_model=list[RepoOut])
-def list_repos(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """The repositories this user has ingested (stored data, not the live GitHub list)."""
+def list_repos(db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_user)):
+    """The public demo repositories, plus the ones this user ingested (stored data, not the live
+    GitHub list). Without a login: only the public ones."""
     rows = (
         db.query(Repository, func.count(PullRequest.id), func.max(PullRequest.merged_at))
         .outerjoin(PullRequest, PullRequest.repository_id == Repository.id)
-        .filter(Repository.added_by == current_user.id)
+        .filter(visible_to(current_user))
         .group_by(Repository.id)
         .order_by(Repository.full_name)
         .all()
@@ -187,9 +248,12 @@ def list_repos(db: Session = Depends(get_db), current_user: User = Depends(get_c
             .group_by(PullRequest.repository_id)
             .all()
         )
+    public = public_repos()
     return [
         RepoOut(owner=r.owner, name=r.name, full_name=r.full_name, pr_count=pr_count,
-                last_merged_at=last_merged, llm_analyzed_count=analyzed.get(r.id, 0))
+                last_merged_at=last_merged, llm_analyzed_count=analyzed.get(r.id, 0),
+                is_public=r.full_name.lower() in public,
+                is_owner=current_user is not None and r.added_by == current_user.id)
         for r, pr_count, last_merged in rows
     ]
 
@@ -205,10 +269,10 @@ def list_prs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_optional_user),
 ):
     """One page of a repo's PRs with their metrics, label and (if stored) LLM score."""
-    repository = get_own_repo(db, current_user, owner, repo)
+    repository = get_visible_repo(db, current_user, owner, repo)
 
     label = aliased(PRLabel)
     llm = aliased(LLMAnalysis)
@@ -252,11 +316,34 @@ def list_prs(
     return PRListOut(total=total, limit=limit, offset=offset, items=items)
 
 
+@router.get("/{owner}/{repo}/score-map", response_model=ScoreMapOut)
+def score_map(owner: str, repo: str, label_version: int = Query(DEFAULT_LABEL_VERSION, ge=1),
+              db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_user)):
+    """Every PR in the hybrid reference with its two percentiles and its hindsight label: the data
+    for the risk map. The label is only used to colour the points; it never moves them."""
+    repository = get_visible_repo(db, current_user, owner, repo)
+    hyb = hybrid_subquery(repository.id, LLM_MODEL, PROMPT_VERSION)
+    label = aliased(PRLabel)
+    rows = (
+        db.query(PullRequest.github_pr_number, PullRequest.title, hyb.c.size_pct, hyb.c.llm_pct, hyb.c.n, label)
+        .join(hyb, hyb.c.pr_id == PullRequest.id)
+        .outerjoin(label, (label.pull_request_id == PullRequest.id) & (label.label_version == label_version))
+        .order_by(PullRequest.github_pr_number)
+        .all()
+    )
+    points = []
+    for number, title, sp, lp, n, lab in rows:
+        h = hybrid_out(sp, lp, n)
+        points.append(MapPoint(number=number, title=title, size_percentile=h.size_percentile,
+                               llm_percentile=h.llm_percentile, score=h.score, hindsight=hindsight(lab)))
+    return ScoreMapOut(reference_prs=int(rows[0][4]) if rows else 0, points=points)
+
+
 @router.get("/{owner}/{repo}/prs/{number}", response_model=PRDetailOut)
 def get_pr(owner: str, repo: str, number: int, db: Session = Depends(get_db),
-           current_user: User = Depends(get_current_user)):
+           current_user: User | None = Depends(get_optional_user)):
     """Everything stored about one PR: metrics, labels, LLM answers with their reasons, files."""
-    repository = get_own_repo(db, current_user, owner, repo)
+    repository = get_visible_repo(db, current_user, owner, repo)
     pr = db.query(PullRequest).filter(
         PullRequest.repository_id == repository.id, PullRequest.github_pr_number == number
     ).first()
@@ -299,7 +386,8 @@ def get_pr(owner: str, repo: str, number: int, db: Session = Depends(get_db),
                            churn=m.churn, commit_count=m.commit_count, test_files_changed=m.test_files_changed,
                            is_sensitive_file=m.is_sensitive_file) if m else None,
         labels=[LabelDetail(version=lab.label_version, is_risky=lab.is_risky, window_complete=lab.window_complete,
-                            window_days=lab.label_window_days, reasons=lab.reasons) for lab in labels],
+                            window_days=lab.label_window_days, reasons=lab.reasons,
+                            evidence=evidence_out(lab.evidence) if lab.is_risky else None) for lab in labels],
         hybrid=hybrid_out(*h) if h else None,
         llm_analyses=[llm_detail(a) for a in analyses],
         files=[FileOut(filename=f.filename, status=f.status, additions=f.additions, deletions=f.deletions,

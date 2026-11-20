@@ -16,7 +16,7 @@ from tests.conftest import auth, dt
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "research"))
 from hybrid_rules import pct_rank, rank_average  # noqa: E402
 
-URL = "/repos/big/repo/prs"
+URL = "/api/repos/big/repo/prs"
 
 
 @pytest.fixture
@@ -93,7 +93,7 @@ def test_detail_gives_the_same_hybrid_as_the_list(client, random_repo):
 
 
 def test_reference_is_per_repo(client, world):
-    items = client.get("/repos/encode/httpx/prs?sort=hybrid", headers=auth(world["a"])).json()["items"]
+    items = client.get("/api/repos/encode/httpx/prs?sort=hybrid", headers=auth(world["a"])).json()["items"]
     scored = [i for i in items if i["hybrid"]]
     assert sorted(i["number"] for i in scored) == [1, 2, 6, 7]   # churn + research RAG answer
     assert all(i["hybrid"]["reference_prs"] == 4 for i in scored)
@@ -102,7 +102,7 @@ def test_reference_is_per_repo(client, world):
 def test_known_small_example(client, world):
     """Hand-checkable: churn 5, 50, 7, 50 and LLM 10, 70, 55, 70 for PRs 1, 2, 6, 7."""
     got = {i["number"]: i["hybrid"] for i in
-           client.get("/repos/encode/httpx/prs?sort=hybrid", headers=auth(world["a"])).json()["items"] if i["hybrid"]}
+           client.get("/api/repos/encode/httpx/prs?sort=hybrid", headers=auth(world["a"])).json()["items"] if i["hybrid"]}
     # churn ranks: 5->1, 7->2, 50,50->3.5 each; LLM ranks: 10->1, 55->2, 70,70->3.5 each; divide by 4
     assert got[1] == {"score": 25.0, "size_percentile": 25.0, "llm_percentile": 25.0, "reference_prs": 4}
     assert got[6] == {"score": 50.0, "size_percentile": 50.0, "llm_percentile": 50.0, "reference_prs": 4}

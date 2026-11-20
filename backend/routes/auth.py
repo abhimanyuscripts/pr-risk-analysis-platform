@@ -15,7 +15,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("GITHUB_REDIRECT_URI", "http://localhost:8000/auth/callback")
+REDIRECT_URI = os.getenv("GITHUB_REDIRECT_URI", "http://localhost:8000/api/auth/callback")
 # Public repos need no extra scope; set "read:user repo" only if private repos must be analysed
 OAUTH_SCOPE = os.getenv("GITHUB_OAUTH_SCOPE", "read:user")
 STATE_MAX_AGE = 600  # seconds the user has to get through GitHub's consent screen
@@ -58,7 +58,7 @@ async def callback(
     db: Session = Depends(get_db),
 ):
     if not oauth_state or not secrets.compare_digest(state.encode(), oauth_state.encode()):
-        raise HTTPException(status_code=400, detail="Invalid OAuth state - start again at /auth/login")
+        raise HTTPException(status_code=400, detail="Invalid OAuth state - start again at /api/auth/login")
     response.delete_cookie("oauth_state")  # one login per state
 
     async with httpx.AsyncClient(timeout=15.0) as client:

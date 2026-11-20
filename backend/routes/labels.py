@@ -3,13 +3,13 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from auth.dependencies import get_current_user
+from auth.dependencies import require_writer
 from database.connection import get_db
-from database.models import Repository, PullRequest, Commit, ChangedFile, PRLabel
+from database.models import Repository, PullRequest, Commit, ChangedFile, PRLabel, User
 from routes.metrics import TEST_PATTERNS
 
-# every route here does heavy DB work, so all of them require a logged-in user
-router = APIRouter(prefix="/labels", tags=["labels"], dependencies=[Depends(get_current_user)])
+# every route here rewrites stored labels, so only accounts in ALLOWED_WRITERS may call it
+router = APIRouter(prefix="/labels", tags=["labels"], dependencies=[Depends(require_writer)])
 
 # v1: loose substring match on any file (kept unchanged so v1 and v2 can be compared)
 FIX_PATTERNS = ["fix", "bug", "hotfix", "patch"]
@@ -47,23 +47,33 @@ def message_is_corrective(message: str | None, version: int) -> bool:
     return FIX_REGEX.search(message) is not None
 
 
+def _first_line(message: str | None, limit: int = 200) -> str:
+    line = (message or "").strip().splitlines()[0] if (message or "").strip() else ""
+    return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
 def compute_label_for_pr(pr: PullRequest, all_prs: list[PullRequest], db: Session, version: int = 2,
-                         window_days: int = WINDOW_DAYS) -> tuple[bool, list[str]]:
+                         window_days: int = WINDOW_DAYS, evidence: dict | None = None) -> tuple[bool, list[str]]:
     # window_days is a parameter only so research/window_sensitivity.py can test 30/90 days;
     # the API route always uses WINDOW_DAYS (60).
+    # evidence: pass a dict to learn WHICH later PR made the label risky. The PRs are checked in merge
+    # order, so it is the first one; this never changes the label itself (any match makes it risky).
     reasons = []
 
     if pr.state != "merged" or pr.merged_at is None:
         return False, ["not merged — not eligible for labeling"]
 
+    others = sorted((o for o in all_prs if o.id != pr.id and o.merged_at is not None),
+                    key=lambda o: (o.merged_at, o.github_pr_number))
+
     # --- Signal 1: explicit revert ---
     revert_title = f'Revert "{pr.title}"'
-    was_reverted = any(
-        other.title.strip() == revert_title and other.state == "merged"
-        for other in all_prs if other.id != pr.id
-    )
-    if was_reverted:
+    revert = next((o for o in others if o.title.strip() == revert_title and o.state == "merged"), None)
+    if revert is not None:
         reasons.append("reverted")
+        if evidence is not None:
+            evidence["revert"] = {"number": revert.github_pr_number, "title": revert.title,
+                                  "merged_at": revert.merged_at.isoformat()}
 
     # --- Signal 2: corrective commit on a touched file, within the window ---
     # v1 counts every file; v2 only source files; v3 source files minus test files
@@ -80,19 +90,26 @@ def compute_label_for_pr(pr: PullRequest, all_prs: list[PullRequest], db: Sessio
     window_end = pr.merged_at + timedelta(days=window_days)
 
     corrective_hit = False
-    for other in all_prs:
-        if other.id == pr.id or other.merged_at is None:
+    for other in others:  # in merge order
+        if other.merged_at <= pr.merged_at:
             continue
-        if not (pr.merged_at < other.merged_at <= window_end):
-            continue
+        if other.merged_at > window_end:
+            break
 
         other_commits = db.query(Commit).filter(Commit.pull_request_id == other.id).all()
-        is_corrective = any(message_is_corrective(c.message, version) for c in other_commits)
-        if not is_corrective:
+        corrective = [c for c in other_commits if message_is_corrective(c.message, version)]
+        if not corrective:
             continue
 
-        if my_files & overlap_files(other.id):
+        shared = my_files & overlap_files(other.id)
+        if shared:
             corrective_hit = True
+            if evidence is not None:
+                # the earliest commit whose message reads as a fix
+                c = min(corrective, key=lambda c: (c.committed_at is None, c.committed_at or other.merged_at, c.sha))
+                evidence["fix"] = {"number": other.github_pr_number, "title": other.title,
+                                   "merged_at": other.merged_at.isoformat(), "commit_sha": c.sha,
+                                   "commit_message": _first_line(c.message), "files": sorted(shared)}
             break
 
     if corrective_hit:
@@ -106,14 +123,22 @@ def compute_label_for_pr(pr: PullRequest, all_prs: list[PullRequest], db: Sessio
 
 
 @router.post("/compute/{owner}/{repo}")
-def compute_labels_for_repo(owner: str, repo: str, version: int = 2, db: Session = Depends(get_db)):
+def compute_labels_for_repo(owner: str, repo: str, version: int = 2, db: Session = Depends(get_db),
+                            current_user: User = Depends(require_writer)):
     if version not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="version must be 1, 2 or 3")
 
-    repository = db.query(Repository).filter(Repository.owner == owner, Repository.name == repo).first()
+    # only the account that added the repository may relabel it
+    repository = db.query(Repository).filter(
+        Repository.owner == owner, Repository.name == repo, Repository.added_by == current_user.id
+    ).first()
     if not repository:
         raise HTTPException(status_code=404, detail="Repository not found — ingest it first")
+    return label_repository(db, repository, version)
 
+
+def label_repository(db: Session, repository: Repository, version: int) -> dict:
+    """Compute and store one label version for every PR of a repository, with its evidence."""
     all_prs = db.query(PullRequest).filter(PullRequest.repository_id == repository.id).all()
 
     # A PR's window is complete only if the data extends WINDOW_DAYS past its merge date.
@@ -124,7 +149,8 @@ def compute_labels_for_repo(owner: str, repo: str, version: int = 2, db: Session
     usable_count = 0
     usable_risky = 0
     for pr in all_prs:
-        is_risky, reasons = compute_label_for_pr(pr, all_prs, db, version)
+        evidence = {"revert": None, "fix": None}
+        is_risky, reasons = compute_label_for_pr(pr, all_prs, db, version, evidence=evidence)
         window_complete = (
             pr.state == "merged" and pr.merged_at is not None and data_end is not None
             and pr.merged_at + timedelta(days=WINDOW_DAYS) <= data_end
@@ -140,6 +166,7 @@ def compute_labels_for_repo(owner: str, repo: str, version: int = 2, db: Session
 
         label.is_risky = is_risky
         label.reasons = ", ".join(reasons)
+        label.evidence = evidence if is_risky else None
         label.label_window_days = WINDOW_DAYS
         label.labeled_at = datetime.now(timezone.utc)
 
