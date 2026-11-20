@@ -22,6 +22,18 @@ which the app keeps in `sessionStorage` (gone when the tab is closed).
 - `VITE_API_URL` (optional, in `.env.local`): backend address, default `http://localhost:8000`.
 - The port is fixed at 5173 because the backend allows that origin (CORS) and returns there after login.
 
+## Browser tests (Phase 17b)
+
+Playwright opens a real Chromium, runs the built app and answers every API call itself
+(`e2e/mockApi.ts`), so the backend, database and GitHub are not needed.
+
+```
+npx playwright install chromium   # first time only (downloads the browser)
+npm run test:e2e
+```
+
+A failed test leaves a trace you can replay: `npx playwright show-trace test-results/<test>/trace.zip`.
+
 ## Other commands
 
 - `npm run build`: type-check and build into `dist/`
