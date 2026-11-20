@@ -27,11 +27,15 @@ http://localhost:5173; Vite forwards `/api` here.
 
 ## Upgrading from Phase 18 (once)
 
+0. Stop the Phase 18 containers, which still answer on ports 8000 and 5173 with the old code:
+   `docker compose down --remove-orphans` in the repo root (the new compose file no longer has the
+   `backend` and `frontend` services, so plain `down` would leave them running; the data stays in the volume).
 1. In `backend/.env`: `GITHUB_REDIRECT_URI=http://localhost:8000/api/auth/callback`,
    `PUBLIC_REPOS=encode/httpx`, `ALLOWED_WRITERS=<your-github-username>`.
 2. In the laptop's GitHub OAuth app, set the callback URL to `http://localhost:8000/api/auth/callback`.
 3. `python -m database.migrate`, then `python scripts/add_label_evidence.py encode/httpx` (stores which
    later PR made each risky label risky; it changes no label and writes nothing if any label would change).
+4. Restart uvicorn: `--reload` only watches `.py` files, so a running server does not see `.env` changes.
 
 ## Which requirements file?
 
