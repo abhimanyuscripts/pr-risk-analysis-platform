@@ -10,7 +10,7 @@ Does combining traditional PR metrics, ML-based risk prediction, and RAG-enhance
 
 ## Tech Stack
 
-- **Frontend:** Next.js, React, TypeScript, Tailwind CSS
+- **Frontend:** React, TypeScript, Tailwind CSS
 - **Backend:** Python, FastAPI, SQLAlchemy
 - **Database:** PostgreSQL + pgvector
 - **ML:** scikit-learn, XGBoost, SHAP

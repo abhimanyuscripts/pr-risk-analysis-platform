@@ -1,5 +1,6 @@
 from cryptography.fernet import InvalidToken
-from fastapi import Depends, HTTPException, Header
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from database.connection import get_db
@@ -8,12 +9,17 @@ from auth.encryption import decrypt_token
 from auth.jwt_handler import decode_access_token
 
 
-def get_current_user(authorization: str | None = Header(None), db: Session = Depends(get_db)) -> User:
-    if not authorization or not authorization.startswith("Bearer "):
+# Declares "Authorization: Bearer <token>" to FastAPI, which is what makes Swagger (/docs) show an
+# Authorize button. auto_error=False keeps our own 401 message instead of FastAPI's default 403.
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+                     db: Session = Depends(get_db)) -> User:
+    if credentials is None:  # no header, or a scheme other than Bearer
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
 
-    token = authorization.replace("Bearer ", "")
-    user_id = decode_access_token(token)
+    user_id = decode_access_token(credentials.credentials)
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
