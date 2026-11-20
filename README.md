@@ -2,8 +2,10 @@
 
 AI-powered Pull Request risk analysis platform combining traditional software-engineering metrics, machine learning, and a RAG-grounded LLM into an explainable hybrid risk assessment.
 
-**Status:** backend, research pipeline, website, tests, CI and Docker built (Phases 0–18 of 21); Phase 19
-(cloud deployment) is ready to deploy, see [docs/DEPLOY.md](docs/DEPLOY.md).
+**Status:** Phases 0–19 of 21 done: backend, research pipeline, website, tests, CI, Docker and the live site.
+
+**Live:** https://pr-risk.onrender.com (the encode/httpx demo opens without logging in; on the free plan the
+first visit after a quiet spell takes about a minute).
 
 ## Research Question
 
