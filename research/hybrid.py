@@ -114,8 +114,9 @@ def analyze(train, test, llm):
     print(f"  Spearman, LogReg vs LLM+RAG score: {pd.Series(lr).corr(pd.Series(llm_s), method='spearman'):.2f}")
     print(f"  distinct LLM+RAG scores: {pd.Series(llm_s).nunique()} (fewer values = more ties)")
     a, b, risky = flags[CHURN], flags[LLM], y == 1
-    print("  Risky PRs caught when each flags about the same number of PRs "
-          f"(of {int(risky.sum())} risky): churn only {int((a & ~b & risky).sum())}, "
+    print(f"  Risky PRs caught (of {int(risky.sum())} risky). NOTE: churn flags {int(a.sum())} PRs but the LLM "
+          f"flags {int(b.sum())} (tied scores), so this is not an equal-workload comparison: "
+          f"churn only {int((a & ~b & risky).sum())}, "
           f"LLM only {int((~a & b & risky).sum())}, both {int((a & b & risky).sum())}, "
           f"neither {int((~a & ~b & risky).sum())}")
 
