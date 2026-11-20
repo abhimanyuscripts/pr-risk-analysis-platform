@@ -1,4 +1,7 @@
+import os
+
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from routes.auth import router as auth_router
@@ -11,6 +14,18 @@ from routes.labels import router as labels_router
 
 
 app = FastAPI()
+
+# The React dev server runs on its own port, so the browser treats it as a different origin and blocks its
+# calls unless this API says it is allowed. 5173 = Vite's default port, 3000 = the other common one.
+# Override with FRONTEND_ORIGINS="https://your-site,..." (comma-separated) when deploying.
+FRONTEND_ORIGINS = [o.strip() for o in os.getenv(
+    "FRONTEND_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=FRONTEND_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],  # the token travels in a header, not a cookie
+)
 app.include_router(auth_router)
 app.include_router(github_router)
 app.include_router(metrics_router)
