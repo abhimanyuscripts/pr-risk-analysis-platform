@@ -1,42 +1,51 @@
 import type { Hybrid, Label, LLMScore } from '../lib/types'
 
-const LEVEL_STYLE: Record<string, string> = {
-  low: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  medium: 'bg-amber-50 text-amber-800 ring-amber-200',
-  high: 'bg-rose-50 text-rose-700 ring-rose-200',
+// Predictions are filled; hindsight (what happened later) is only ever outlined.
+
+const LEVEL: Record<string, string> = {
+  low: 'bg-calm/10 text-calm',
+  medium: 'bg-amber/12 text-amber',
+  high: 'bg-fix/10 text-fix',
 }
 
 export function LLMBadge({ llm }: { llm: LLMScore | null }) {
-  if (!llm) return <span className="text-slate-400">—</span>
+  if (!llm) return <span className="text-graphite/60">—</span>
   return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ring-1 ring-inset ${LEVEL_STYLE[llm.risk_level] ?? 'bg-slate-50 text-slate-700 ring-slate-200'}`}>
-      <span className="font-medium tabular-nums">{llm.risk_score}</span>
+    <span className={`inline-flex items-baseline gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${LEVEL[llm.risk_level] ?? 'bg-ink/5 text-ink'}`}>
+      <span className="font-semibold">{llm.risk_score}</span>
       <span>{llm.risk_level}</span>
     </span>
   )
 }
 
-/** The label is hindsight (was there a fix within 60 days?), never a prediction. */
+/** The label is hindsight (did a fix touch the same files within 60 days?), never a prediction. */
 export function LabelBadge({ label }: { label: Label | null }) {
-  if (!label) return <span className="text-slate-400">—</span>
+  if (!label) return <span className="text-graphite/60">—</span>
   if (!label.window_complete)
-    return <span className="text-xs text-slate-500" title="Fewer than 60 days of later history: not known yet">pending</span>
+    return (
+      <span className="text-xs text-graphite" title="Fewer than 60 days of later history, so not known yet">
+        pending
+      </span>
+    )
   return label.is_risky ? (
-    <span className="rounded-md bg-rose-600 px-1.5 py-0.5 text-xs font-medium text-white">fix followed</span>
+    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-fix ring-1 ring-fix/60 ring-inset">
+      <span className="size-1.5 rounded-full ring-[1.5px] ring-fix" aria-hidden="true" />
+      fix followed
+    </span>
   ) : (
-    <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">no fix</span>
+    <span className="rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap text-graphite ring-1 ring-rule ring-inset">no fix</span>
   )
 }
 
 export function HybridBar({ hybrid }: { hybrid: Hybrid | null }) {
-  if (!hybrid) return <span className="text-xs text-slate-400" title="Needs an LLM answer and metrics">not scored</span>
-  const tip = `Size percentile ${hybrid.size_percentile} · LLM percentile ${hybrid.llm_percentile} · vs ${hybrid.reference_prs} analysed PRs`
+  if (!hybrid) return <span className="text-xs text-graphite/70" title="Needs an LLM answer and metrics">not scored</span>
+  const tip = `Size percentile ${hybrid.size_percentile}, LLM percentile ${hybrid.llm_percentile}, against ${hybrid.reference_prs} analysed PRs`
   return (
-    <div className="flex items-center gap-2" title={tip}>
-      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
-        <div className="h-full rounded-full bg-slate-800" style={{ width: `${hybrid.score}%` }} />
+    <div className="flex items-center gap-3" title={tip}>
+      <div className="relative h-1.5 w-24 rounded-full bg-ink/8">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-ink" style={{ width: `${hybrid.score}%` }} />
       </div>
-      <span className="w-8 text-right text-xs font-medium tabular-nums text-slate-900">{Math.round(hybrid.score)}</span>
+      <span className="w-7 text-right text-sm font-semibold text-ink">{Math.round(hybrid.score)}</span>
     </div>
   )
 }

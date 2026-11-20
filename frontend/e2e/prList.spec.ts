@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { loginAs, mockApi, PRS, type MockApi } from './mockApi'
+import { loginAs, MAP, mockApi, PRS, type MockApi } from './mockApi'
 
 let api: MockApi
 test.beforeEach(async ({ page }) => {
@@ -8,6 +8,16 @@ test.beforeEach(async ({ page }) => {
 })
 
 const lastQuery = () => Object.fromEntries(api.prListQueries.at(-1)!)
+
+/** The fix ring furthest from every other point, in the middle of the map (away from the sticky header). */
+function isolatedFix() {
+  const dist = (a: (typeof MAP.points)[number], b: (typeof MAP.points)[number]) =>
+    Math.hypot(a.size_percentile - b.size_percentile, a.llm_percentile - b.llm_percentile)
+  const candidates = MAP.points.filter((p) => p.hindsight === 'fix' && p.llm_percentile > 20 && p.llm_percentile < 80)
+  return candidates
+    .map((p) => ({ p, gap: Math.min(...MAP.points.filter((q) => q !== p).map((q) => dist(p, q))) }))
+    .sort((a, b) => b.gap - a.gap)[0].p
+}
 const rows = (page: Page) => page.locator('tbody tr')
 const hindsight = (page: Page) => page.locator('tbody tr td:last-child')
 const sortBy = (page: Page) => page.getByLabel('Sort by')
@@ -19,7 +29,7 @@ test('default view: hybrid, highest first, 50 per page', async ({ page }) => {
   await expect(page.getByText('1–50 of 120')).toBeVisible()
   await expect(rows(page)).toHaveCount(50)
   expect(lastQuery()).toEqual({ sort: 'hybrid', desc: 'true', limit: '50', offset: '0' })
-  await expect(page.getByText('experimental', { exact: false }).first()).toBeVisible()
+  await expect(page.getByText(/experimental/).first()).toBeVisible()
 })
 
 test('PRs without a hybrid come last and say "not scored"', async ({ page }) => {
@@ -36,7 +46,7 @@ test('the hindsight column shows every label state, and the open PR is marked', 
     await expect(page.locator('tbody')).not.toHaveClass(/opacity/)
     await expect(rows(page).first()).toBeVisible()
     seen.push(...(await hindsight(page).allInnerTexts()))
-    opened += await page.locator('tbody tr td:first-child span', { hasText: '· open' }).count()
+    opened += await page.locator('tbody tr td:first-child span span', { hasText: /^open$/ }).count()
   }
   expect(seen).toHaveLength(120)
   expect(seen.filter((t) => t === 'pending')).toHaveLength(1)
@@ -80,6 +90,22 @@ test('paging: next, reload, last page and back', async ({ page }) => {
   await expect.poll(() => lastQuery()).toMatchObject({ desc: 'false', offset: '0' })
   await page.goBack()
   await expect(page.getByText('101–120 of 120')).toBeVisible()
+})
+
+test('the risk map shows every analysed PR and opens one on click', async ({ page }) => {
+  await page.goto('/repos/encode/httpx')
+  const map = page.getByRole('img', { name: /Risk map of 390 analysed pull requests/ })
+  await expect(map).toBeVisible()
+  await expect(map.locator('circle')).toHaveCount(390)
+  const fixes = MAP.points.filter((p) => p.hindsight === 'fix').length
+  await expect(page.getByText(`A fix followed (${fixes})`)).toBeVisible()
+  // a "fix followed" ring with no other PR on top of it: hollow, but it must still react to the mouse
+  const ring = map.locator(`circle[data-pr="${isolatedFix().number}"]`)
+  await expect(ring).toHaveAttribute('r', '5')
+  await ring.hover()
+  await expect(page.getByText(/^Hybrid \d+ from size \d+ and LLM \d+\. A fix followed\.$/)).toBeVisible()
+  await ring.click()
+  await expect(page).toHaveURL(new RegExp(`/repos/encode/httpx/prs/${isolatedFix().number}$`))
 })
 
 test('clicking a PR opens its detail page', async ({ page }) => {
