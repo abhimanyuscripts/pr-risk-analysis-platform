@@ -1,7 +1,7 @@
-# Phase 18b: the whole platform with one command.
-#   docker compose up --build        then open http://localhost:5173
+# The whole platform with one command, the same image that runs on Render:
+#   docker compose up --build        then open http://localhost:8000
 # First time only, copy your local data into the container database: scripts/copy-db-to-docker.sh
-# Stop the local uvicorn (port 8000) and `npm run dev` (port 5173) first; the containers use those ports.
+# Stop the local uvicorn (port 8000) first; the app container uses that port.
 name: pr-risk
 
 services:
@@ -22,27 +22,23 @@ services:
       timeout: 5s
       retries: 10
 
-  backend:
-    build: ./backend
-    env_file: backend/.env # GitHub OAuth, JWT and encryption keys, same as running it locally
+  app:
+    build: . # the Dockerfile in the repo root: React build + FastAPI in one image
+    env_file: backend/.env # GitHub OAuth, JWT and encryption keys, PUBLIC_REPOS, same as running it locally
     environment:
-      # Overrides DATABASE_URL from backend/.env: inside Docker the database is the `db` service
+      # Inside Docker the database is the `db` service, and the app itself is the site on port 8000
       DATABASE_URL: postgresql+psycopg://pr_risk_app:${POSTGRES_PASSWORD:-pr_risk_local}@db:5432/pr_risk_dev
+      FRONTEND_URL: http://localhost:8000
     ports:
       - "8000:8000" # same port as before, so the GitHub OAuth callback URL does not change
     depends_on:
       db:
         condition: service_healthy
-
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        VITE_API_URL: http://localhost:8000 # the browser calls the API on the Mac's port 8000
-    ports:
-      - "5173:80" # same port as `npm run dev`, which the backend allows (CORS) and returns to after login
-    depends_on:
-      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   pgdata:

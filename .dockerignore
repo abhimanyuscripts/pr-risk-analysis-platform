@@ -1,0 +1,23 @@
+# Only backend/ and frontend/ go into the image, and never secrets, data dumps or local environments.
+.git
+.github
+.local
+docs
+research
+scripts
+**/.env
+**/.env.*
+!**/.env.example
+*.dump
+**/node_modules
+**/dist
+**/venv
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+backend/tests
+backend/static
+frontend/test-results
+frontend/playwright-report
+**/.DS_Store

@@ -25,3 +25,8 @@ npm-debug.log*
 # Editor
 .vscode/
 .idea/
+
+# Local data copies (database dumps) and the built app copied into the backend
+.local/
+*.dump
+backend/static/

@@ -1,0 +1,39 @@
+# Phase 19: the live site on Render's free plan, built from the Dockerfile in the repo root.
+# Render dashboard > New > Blueprint > pick this repository. Render asks once for every `sync: false`
+# value (docs/DEPLOY.md says where each one comes from). Nothing secret is written in this file.
+services:
+  - type: web
+    name: pr-risk
+    runtime: docker
+    plan: free
+    region: singapore # the Render region closest to India; it cannot be changed after creation
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass # main is deployed only after the CI checks pass
+    envVars:
+      - key: APP_ENV
+        value: production # refuses to start with weak or missing settings (backend/settings.py)
+      - key: PUBLIC_REPOS
+        value: encode/httpx # the demo anyone can open without logging in
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite # which stored LLM answers to show; the site never calls Gemini
+      - key: GITHUB_OAUTH_SCOPE
+        value: read:user
+      # Both secrets are new random values made by Render (base64 of 32 random bytes), never seen by anyone
+      # and never the laptop's. A base64 32-byte value is also a valid Fernet key.
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: TOKEN_ENCRYPTION_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # the Neon connection string
+      - key: GITHUB_CLIENT_ID
+        sync: false # from the production GitHub OAuth app
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_REDIRECT_URI
+        sync: false # https://<your-site>.onrender.com/api/auth/callback
+      - key: FRONTEND_URL
+        sync: false # https://<your-site>.onrender.com
+      # ALLOWED_WRITERS is left out on purpose: the live site is read-only. Data is collected on the
+      # laptop and copied up with scripts/copy-db-to-neon.sh.
