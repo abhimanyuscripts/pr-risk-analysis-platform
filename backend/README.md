@@ -13,6 +13,14 @@ uvicorn main:app --reload        # http://localhost:8000, API docs at /docs
 
 Settings live in `backend/.env` (copy `.env.example`).
 
+## Which requirements file?
+
+- `requirements.txt`: everything, including the LLM / RAG / ML batch scripts (torch, transformers, ...).
+  Use this on your laptop.
+- `requirements-api.txt`: only what the API needs (no torch; a few hundred MB instead of several GB on Linux).
+  Used by CI and the Docker image.
+- `requirements-dev.txt`: the API list plus the test tools.
+
 ## Tests (Phase 17)
 
 The tests need their own, empty PostgreSQL database, because they create and empty tables on every run.
@@ -39,3 +47,4 @@ pytest
 ```
 
 The tests use fixed fake secrets and a fake GitHub, so they never call GitHub or the LLM.
+GitHub Actions runs the same tests on every pull request (`.github/workflows/ci.yml`).
