@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, aliased
 
 from auth.dependencies import get_current_user
 from database.connection import get_db
-from database.models import LLMAnalysis, PRLabel, PRMetrics, PullRequest, Repository, User
+from database.models import ChangedFile, LLMAnalysis, PRLabel, PRMetrics, PullRequest, Repository, User
 from llm.prompt import PROMPT_VERSION
 
 router = APIRouter(prefix="/repos", tags=["repos"])
@@ -65,6 +65,71 @@ class PRListOut(BaseModel):
     limit: int
     offset: int
     items: list[PRListItem]
+
+
+class MetricsOut(BaseModel):
+    files_changed: int | None
+    lines_added: int | None
+    lines_deleted: int | None
+    churn: int | None
+    commit_count: int | None
+    test_files_changed: int | None
+    is_sensitive_file: bool
+
+
+class LabelDetail(LabelOut):
+    window_days: int
+    reasons: str | None  # why it was labelled risky; this is hindsight, not something known at merge time
+
+
+class ConcernOut(BaseModel):
+    category: str
+    file: str
+    explanation: str
+
+
+class DocChunkOut(BaseModel):
+    heading: str | None
+    distance: float  # cosine distance, 0 = same meaning; lower = closer match
+
+
+class LLMDetail(BaseModel):
+    model: str
+    prompt_version: int
+    use_rag: bool
+    risk_score: int
+    risk_level: str
+    summary: str
+    concerns: list[ConcernOut]
+    tests_included: bool | None
+    diff_truncated: bool          # True = the LLM saw only part of the diff
+    retrieved_docs: list[DocChunkOut]  # RAG only: the doc sections put in the prompt
+    created_at: datetime | None
+
+
+class FileOut(BaseModel):
+    filename: str
+    status: str | None
+    additions: int
+    deletions: int
+    has_diff: bool  # the diff itself is not sent: it can be very large
+
+
+class PRDetailOut(BaseModel):
+    number: int
+    title: str
+    description: str | None
+    author: str
+    state: str
+    base_branch: str | None
+    head_branch: str | None
+    created_at: datetime
+    merged_at: datetime | None
+    github_url: str
+    metrics: MetricsOut | None
+    labels: list[LabelDetail]  # every computed version, newest version first
+    llm_analyses: list[LLMDetail]  # the research model's RAG answer first, then the rest
+    files: list[FileOut]  # biggest change first
 
 
 # ---- helpers ----
@@ -161,3 +226,55 @@ def list_prs(
         for pr, m, lab, a in rows
     ]
     return PRListOut(total=total, limit=limit, offset=offset, items=items)
+
+
+@router.get("/{owner}/{repo}/prs/{number}", response_model=PRDetailOut)
+def get_pr(owner: str, repo: str, number: int, db: Session = Depends(get_db),
+           current_user: User = Depends(get_current_user)):
+    """Everything stored about one PR: metrics, labels, LLM answers with their reasons, files."""
+    repository = get_own_repo(db, current_user, owner, repo)
+    pr = db.query(PullRequest).filter(
+        PullRequest.repository_id == repository.id, PullRequest.github_pr_number == number
+    ).first()
+    if not pr:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+
+    m = db.query(PRMetrics).filter(PRMetrics.pull_request_id == pr.id).first()
+    labels = (db.query(PRLabel).filter(PRLabel.pull_request_id == pr.id)
+              .order_by(PRLabel.label_version.desc()).all())
+    analyses = db.query(LLMAnalysis).filter(LLMAnalysis.pull_request_id == pr.id).all()
+    # the answer the dashboard headlines (research model, current prompt, RAG) comes first
+    analyses.sort(key=lambda a: (not (a.model == LLM_MODEL and a.prompt_version == PROMPT_VERSION and a.use_rag),
+                                 a.model, -a.prompt_version, not a.use_rag))
+    files = (db.query(ChangedFile).filter(ChangedFile.pull_request_id == pr.id)
+             .order_by((ChangedFile.additions + ChangedFile.deletions).desc(), ChangedFile.filename).all())
+
+    def llm_detail(a: LLMAnalysis) -> LLMDetail:
+        r = a.result or {}
+        return LLMDetail(
+            model=a.model, prompt_version=a.prompt_version, use_rag=a.use_rag,
+            risk_score=a.risk_score, risk_level=a.risk_level,
+            summary=r.get("summary", ""),
+            concerns=[ConcernOut(category=c.get("category", ""), file=c.get("file", ""),
+                                 explanation=c.get("explanation", "")) for c in r.get("concerns", [])],
+            tests_included=r.get("tests_included"),
+            diff_truncated=a.diff_truncated,
+            retrieved_docs=[DocChunkOut(heading=c.get("heading"), distance=c.get("distance", 0.0))
+                            for c in (a.retrieved_chunks or [])],
+            created_at=a.created_at,
+        )
+
+    return PRDetailOut(
+        number=pr.github_pr_number, title=pr.title, description=pr.description,
+        author=pr.author_username, state=pr.state, base_branch=pr.base_branch, head_branch=pr.head_branch,
+        created_at=pr.created_at, merged_at=pr.merged_at,
+        github_url=f"https://github.com/{repository.full_name}/pull/{pr.github_pr_number}",
+        metrics=MetricsOut(files_changed=m.files_changed, lines_added=m.lines_added, lines_deleted=m.lines_deleted,
+                           churn=m.churn, commit_count=m.commit_count, test_files_changed=m.test_files_changed,
+                           is_sensitive_file=m.is_sensitive_file) if m else None,
+        labels=[LabelDetail(version=lab.label_version, is_risky=lab.is_risky, window_complete=lab.window_complete,
+                            window_days=lab.label_window_days, reasons=lab.reasons) for lab in labels],
+        llm_analyses=[llm_detail(a) for a in analyses],
+        files=[FileOut(filename=f.filename, status=f.status, additions=f.additions, deletions=f.deletions,
+                       has_diff=f.patch is not None) for f in files],
+    )
