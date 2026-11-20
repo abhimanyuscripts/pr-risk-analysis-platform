@@ -19,10 +19,14 @@ REDIRECT_URI = os.getenv("GITHUB_REDIRECT_URI", "http://localhost:8000/auth/call
 # Public repos need no extra scope; set "read:user repo" only if private repos must be analysed
 OAUTH_SCOPE = os.getenv("GITHUB_OAUTH_SCOPE", "read:user")
 STATE_MAX_AGE = 600  # seconds the user has to get through GitHub's consent screen
+# Where the React app runs. A login started from the app (/auth/login?app=true) ends there.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 
 @router.get("/login")
-def login():
+def login(app: bool = False):
+    """Start GitHub login. app=true: the React app started it, so the callback sends the browser back
+    to the app with the token. Without it the callback shows the token as JSON (handy in Swagger)."""
     state = secrets.token_urlsafe(32)
     params = {
         "client_id": GITHUB_CLIENT_ID,
@@ -38,6 +42,9 @@ def login():
         "oauth_state", state, max_age=STATE_MAX_AGE, httponly=True, samesite="lax",
         secure=REDIRECT_URI.startswith("https://"),
     )
+    if app:
+        response.set_cookie("login_target", "app", max_age=STATE_MAX_AGE, httponly=True, samesite="lax",
+                            secure=REDIRECT_URI.startswith("https://"))
     return response
 
 
@@ -47,6 +54,7 @@ async def callback(
     state: str,
     response: Response,
     oauth_state: str | None = Cookie(None),
+    login_target: str | None = Cookie(None),
     db: Session = Depends(get_db),
 ):
     if not oauth_state or not secrets.compare_digest(state.encode(), oauth_state.encode()):
@@ -107,4 +115,12 @@ async def callback(
     db.commit()
     db.refresh(user)
     jwt_token = create_access_token(str(user.id))
+    if login_target == "app":
+        # The token goes after '#': browsers never send that part to any server, so it stays out of
+        # server logs and the Referer header. The app reads it and clears it from the address bar.
+        redirect = RedirectResponse(f"{FRONTEND_URL}/auth/done#token={jwt_token}")
+        redirect.delete_cookie("oauth_state")  # a new response object, so the cookies are cleared here
+        redirect.delete_cookie("login_target")
+        return redirect
+    response.delete_cookie("login_target")
     return {"access_token": jwt_token, "token_type": "bearer", "github_username": user.github_username}
