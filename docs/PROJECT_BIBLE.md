@@ -1,7 +1,7 @@
 # PROJECT BIBLE
 ## AI-Powered Pull Request Risk Analysis & Software Engineering Intelligence Platform
 
-*Living document — update after every phase. Last updated: Phase 20a LLM noise check done (22 Nov 2026).*
+*Living document — update after every phase. Last updated: Phase 20b ablation designed (22 Nov 2026).*
 ---
 
 ## 1. Objective
@@ -194,3 +194,11 @@ Rate limits → cache+REST batching · label noise → document, spot-check samp
     - **Verdict by the pre-declared rule: NOT ROBUST.** The hybrid was ahead of the size rule in both runs, but with run 2's scores the 95% range includes zero. The run-to-run change in the LLM's own ROC-AUC (0.016) is about half the hybrid's lead, so the report states the gain as small and not clear across LLM runs, not as a proven improvement. Phase 15's "real improvement" wording is superseded by this.
     - Exploratory, not part of the verdict: the average of the two runs as the LLM score gives P minus size rule +0.038 (95% −0.001 to +0.077).
     - **Consequences:** the website's results caption and its "What the score is not" card now say this (they called the gain "a real gain"). The same pass corrected an older sentence on the start page that said the LLM "caught up" once it could read the docs: 0.763 is still below the size rule's 0.805. The dashboard keeps showing run 1's scores, as designed in Phase 15; the report gives both runs. No third run (none was declared).
+  - **Scope of Phase 20 (decided 22 Nov 2026):** 20a noise check (done) and 20b ablation. Not done, to be reported as limitations / future work: a rubric rating of the answers with docs (RQ1 has only the keyword proxy), a cost table beyond the Phase 14 token and latency figures (RQ4), and a second repository.
+  - **20b — ablation: does the documentation (RAG) help inside the hybrid? (branch `feat/ablation`). Design written here BEFORE the numbers were computed (22 Nov 2026):**
+    - **Question:** the hybrid P uses the LLM's answers *with* docs. Built the same way from the answers *without* docs (Phase 11, same model and prompt v1), is it worse? This isolates what RAG adds inside the hybrid (experiment 6 of the original plan).
+    - **Data:** the same 389 labelled test PRs; size signal = churn; LLM without docs = the `use_rag=false` answers, LLM with docs = the `use_rag=true` answers of run 1 (the ones Phase 15 used). P_docs = rank-average(churn, LLM with docs), i.e. Phase 15's P; P_plain = rank-average(churn, LLM without docs). Same rank-average, nothing tuned, labels not used to build either.
+    - **Primary comparison:** P_docs minus P_plain, ROC-AUC, paired bootstrap with the same 1,000 resamples (seed 42) as Phases 10, 14, 15 and 20a. Also reported: P_plain minus size rule (does a hybrid help even without docs?). The script must reproduce the known numbers first: LLM without docs 0.731, LLM with docs 0.763, P_docs 0.843.
+    - **Rule for the verdict (fixed now):** RAG counts as **adding value inside the hybrid** only if the 95% range of P_docs minus P_plain stays above 0. Otherwise: no clear difference, and the report says the docs did not measurably improve the hybrid.
+    - **Exploratory, not part of the verdict (because only the with-docs side was asked twice):** the same comparisons with run 2's with-docs answers, i.e. P_docs(run 2) minus P_plain, and the LLM-only check of Phase 14's RAG gain (LLM with docs, run 2, minus LLM without docs). Diagnostic: Spearman correlations between churn and each LLM score.
+    - **Not done:** no new LLM calls, no other combination rules, no threshold chosen on test labels.
