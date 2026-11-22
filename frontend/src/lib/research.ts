@@ -1,5 +1,5 @@
 // Results from the research phases, shown on the start page. Source: docs/PROJECT_BIBLE.md
-// (Phases 9-15; encode/httpx, label v3, 60-day window, 389 test PRs). Change only when the research changes.
+// (Phases 9-15 and 20a; encode/httpx, label v3, 60-day window, 389 test PRs). Change only when the research changes.
 
 export interface MethodResult {
   name: string
@@ -22,3 +22,9 @@ export const RESULTS: MethodResult[] = [
 
 /** Paired bootstrap, 1,000 resamples: hybrid minus size rule. */
 export const HYBRID_GAIN = { mean: 0.039, low: 0.002, high: 0.076 }
+
+/** Phase 20a: the same 390 PRs asked again (same prompt and docs, temperature 0). */
+export const NOISE_CHECK = {
+  changedScores: 21.8, // % of PRs whose score changed in the second run
+  gain: { mean: 0.032, low: -0.009, high: 0.071 }, // hybrid minus size rule with the second run's scores
+}

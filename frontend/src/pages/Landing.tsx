@@ -76,8 +76,9 @@ export default function Landing() {
             <div>
               <h2 className="text-4xl leading-tight font-semibold tracking-[-0.03em] text-ink">Six ways to rank the same pull requests</h2>
               <p className="mt-5 max-w-md leading-relaxed text-graphite">
-                Every method scored the same {TEST_PRS} unseen PRs. Machine learning on seven metrics did no better than counting
-                lines; the LLM only caught up once it could read the docs; combining size with the LLM came out on top.
+                Every method scored the same {TEST_PRS} unseen PRs. Machine learning on seven metrics did about as well as
+                counting lines. The LLM scored higher with the project's docs than without, but stayed below the size rule.
+                Combining size with the LLM came out on top, by a small margin.
               </p>
             </div>
             <ResultsChart animate />
@@ -97,9 +98,10 @@ export default function Landing() {
               Every number here comes from encode/httpx, an HTTP library: 1,805 pull requests, 1,295 of them merged.
               Other projects may behave differently.
             </Limit>
-            <Limit title="A small gain">
-              The hybrid beats size alone by 0.039 ROC-AUC, and the low end of its 95% range is close to zero. Treat it as
-              a second opinion, not a verdict.
+            <Limit title="A small, uncertain gain">
+              The hybrid led the size rule by 0.039 ROC-AUC. Asked a second time, the LLM changed about a fifth of its
+              scores, and the lead became 0.032 with a 95% range that includes zero. Treat it as a second opinion, not a
+              verdict.
             </Limit>
           </div>
         </section>

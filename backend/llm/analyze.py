@@ -35,15 +35,11 @@ class LLMResponseError(Exception):
     """The model returned invalid JSON twice in a row."""
 
 
-def analyze_pr(db: Session, pr: PullRequest, client=None, model: str = GEMINI_MODEL,
-               use_rag: bool = False) -> tuple[LLMAnalysis, bool]:
-    """Return (stored analysis, came_from_cache). Never asks twice for the same thing."""
-    existing = db.query(LLMAnalysis).filter_by(
-        pull_request_id=pr.id, model=model, prompt_version=PROMPT_VERSION, use_rag=use_rag
-    ).first()
-    if existing:
-        return existing, True
+def prepare_prompt(db: Session, pr: PullRequest, use_rag: bool = False) -> tuple[str, bool, list | None]:
+    """Build exactly what the LLM sees for one PR: (prompt, diff_truncated, retrieved docs or None).
 
+    Shared by analyze_pr() and the Phase 20 noise check, so a second run asks the same question.
+    """
     repo = db.get(Repository, pr.repository_id)
     files = db.query(ChangedFile).filter(ChangedFile.pull_request_id == pr.id).all()
     doc_chunks, retrieved = None, None
@@ -54,8 +50,11 @@ def analyze_pr(db: Session, pr: PullRequest, client=None, model: str = GEMINI_MO
         retrieved = [{"chunk_id": str(chunk.id), "heading": chunk.heading, "distance": round(dist, 4)}
                      for chunk, dist in hits]
     prompt, truncated = build_prompt(pr, files, repo.full_name, doc_chunks)
+    return prompt, truncated, retrieved
 
-    client = client or get_client()
+
+def ask_llm(client, model: str, prompt: str, pr_number: int):
+    """Ask once (one retry if the JSON is broken). Returns (checked answer, usage metadata, latency ms)."""
     config = types.GenerateContentConfig(
         temperature=0,                         # most repeatable answers
         response_mime_type="application/json",
@@ -68,13 +67,25 @@ def analyze_pr(db: Session, pr: PullRequest, client=None, model: str = GEMINI_MO
         latency_ms = int((time.time() - start) * 1000)
         try:
             result = RiskAnalysis.model_validate_json(response.text or "")
-            break
+            return result, response.usage_metadata, latency_ms
         except ValidationError as exc:         # we still check it ourselves
             last_error = exc
-    else:
-        raise LLMResponseError(f"PR #{pr.github_pr_number}: invalid JSON twice: {last_error}")
+    raise LLMResponseError(f"PR #{pr_number}: invalid JSON twice: {last_error}")
 
-    usage = response.usage_metadata
+
+def analyze_pr(db: Session, pr: PullRequest, client=None, model: str = GEMINI_MODEL,
+               use_rag: bool = False) -> tuple[LLMAnalysis, bool]:
+    """Return (stored analysis, came_from_cache). Never asks twice for the same thing."""
+    existing = db.query(LLMAnalysis).filter_by(
+        pull_request_id=pr.id, model=model, prompt_version=PROMPT_VERSION, use_rag=use_rag
+    ).first()
+    if existing:
+        return existing, True
+
+    prompt, truncated, retrieved = prepare_prompt(db, pr, use_rag)
+    client = client or get_client()
+    result, usage, latency_ms = ask_llm(client, model, prompt, pr.github_pr_number)
+
     row = LLMAnalysis(
         pull_request_id=pr.id, model=model, prompt_version=PROMPT_VERSION, use_rag=use_rag,
         risk_score=result.risk_score, risk_level=result.risk_level, result=result.model_dump(),

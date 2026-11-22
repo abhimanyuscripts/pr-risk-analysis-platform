@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react'
 import { gsap, prefersReducedMotion } from '../lib/motion'
-import { HYBRID_GAIN, RESULTS, TEST_PRS } from '../lib/research'
+import { HYBRID_GAIN, NOISE_CHECK, RESULTS, TEST_PRS } from '../lib/research'
 
 // ROC-AUC of every method on the same test PRs, as a dot plot from 0.5 (coin toss) to 0.9.
 const MIN = 0.5
@@ -65,8 +65,11 @@ export default function ResultsChart({ animate = false }: { animate?: boolean })
       </div>
       <figcaption className="mt-5 max-w-lg text-sm leading-relaxed text-graphite">
         ROC-AUC on {TEST_PRS} pull requests the models never saw during training: the chance that a PR which later
-        needed a fix is ranked above one that did not. The hybrid beats size alone by {HYBRID_GAIN.mean.toFixed(3)}
-        {' '}(95% range {HYBRID_GAIN.low.toFixed(3)} to {HYBRID_GAIN.high.toFixed(3)}): a real gain, but a small one.
+        needed a fix is ranked above one that did not. The hybrid beat size alone by {HYBRID_GAIN.mean.toFixed(3)}
+        {' '}(95% range {HYBRID_GAIN.low.toFixed(3)} to {HYBRID_GAIN.high.toFixed(3)}). Asked a second time, the LLM
+        changed {Math.round(NOISE_CHECK.changedScores)}% of its scores; with those the lead was{' '}
+        {NOISE_CHECK.gain.mean.toFixed(3)} and its range ({NOISE_CHECK.gain.low.toFixed(3)} to{' '}
+        {NOISE_CHECK.gain.high.toFixed(3)}) included zero. Ahead both times, but not clearly.
       </figcaption>
     </figure>
   )
