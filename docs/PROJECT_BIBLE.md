@@ -1,7 +1,7 @@
 # PROJECT BIBLE
 ## AI-Powered Pull Request Risk Analysis & Software Engineering Intelligence Platform
 
-*Living document — update after every phase. Last updated: Phase 20 started, LLM noise check designed (21 Nov 2026).*
+*Living document — update after every phase. Last updated: Phase 20a LLM noise check done (22 Nov 2026).*
 ---
 
 ## 1. Objective
@@ -187,3 +187,10 @@ Rate limits → cache+REST batching · label noise → document, spot-check samp
     - **Rule for the verdict (fixed now):** the Phase 15 gain counts as **robust to LLM noise** if, with run 2's scores, the 95% range of "P minus size rule" stays above 0. Otherwise the report states that the gain depends on the particular LLM run. Either way both runs are reported.
     - **Exploratory, not part of the verdict:** the hybrid with the average of the two runs as the LLM score.
     - **Not done:** no prompt, model or retrieval changes, no tuning on the result, no third run unless the report needs one, and that would be declared here first.
+  - **20a result (run 2 collected 22 Nov 2026; data `research/results/llm_noise_run2.jsonl`, numbers from `research/llm_noise.py`):**
+    - All 390 PRs asked again, 0 failures. Every PR got the same 4 doc chunks and the same input token count as in run 1, so every difference below is the LLM's own.
+    - **Agreement:** 78.2% identical scores (85 of 390 changed); absolute change mean 1.8, median 0, 90th percentile 5, largest 55 (#2911: 65 → 10); Spearman 0.934; same risk level for 97.2%, Cohen's kappa 0.83. A few large swings besides #2911: #3401 and #3418 35 → 65, #2771 40 → 15. Temperature 0 does not make Gemini give the same answer twice.
+    - **On the 389 labelled test PRs:** LLM with docs ROC-AUC 0.763 (run 1) vs 0.747 (run 2), difference −0.016 (95% −0.042 to +0.008). Hybrid P 0.843 vs 0.837. P minus size rule: run 1 +0.039 (95% +0.002 to +0.076, reproducing Phase 15 exactly), run 2 +0.032 (95% −0.009 to +0.071).
+    - **Verdict by the pre-declared rule: NOT ROBUST.** The hybrid was ahead of the size rule in both runs, but with run 2's scores the 95% range includes zero. The run-to-run change in the LLM's own ROC-AUC (0.016) is about half the hybrid's lead, so the report states the gain as small and not clear across LLM runs, not as a proven improvement. Phase 15's "real improvement" wording is superseded by this.
+    - Exploratory, not part of the verdict: the average of the two runs as the LLM score gives P minus size rule +0.038 (95% −0.001 to +0.077).
+    - **Consequences:** the website's results caption and its "What the score is not" card now say this (they called the gain "a real gain"). The same pass corrected an older sentence on the start page that said the LLM "caught up" once it could read the docs: 0.763 is still below the size rule's 0.805. The dashboard keeps showing run 1's scores, as designed in Phase 15; the report gives both runs. No third run (none was declared).
