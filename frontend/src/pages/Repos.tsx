@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import { ErrorState, Skeleton } from '../components/states'
 import { startLogin } from '../lib/api'
+import { DEMO_REPO } from '../lib/config'
 import { useSession } from '../lib/session'
 import type { Repo } from '../lib/types'
 import { useApi } from '../lib/useApi'
@@ -32,14 +33,20 @@ export default function Repos() {
           {user ? (
             <Group
               title="Private to you"
-              note="Repositories you ingested through the API. Only your account can open them."
+              note="Only your account can open these."
               repos={own}
-              empty="You have no private repositories yet. Ingest one through the API and it appears here."
+              empty={
+                user.can_write
+                  ? 'None yet. Ingest a repository through the API and it appears here. Its scores follow once the LLM step has run offline.'
+                  : `Adding your own repositories isn't open yet. This site shows one study, ${DEMO_REPO}, and the LLM step runs offline on the project team's machine.`
+              }
             />
           ) : (
             <div className="mt-14 rounded-2xl px-6 py-8 ring-1 ring-rule ring-inset">
               <h2 className="text-xl font-semibold tracking-tight text-ink">Your own repositories</h2>
-              <p className="mt-1 max-w-md text-sm text-graphite">Log in with GitHub to see the repositories you ingested. Only you can open them.</p>
+              <p className="mt-1 max-w-md text-sm text-graphite">
+                Adding repositories isn't open to the public yet. Log in with GitHub to see any stored for your account.
+              </p>
               <button onClick={() => startLogin('/repos')} className="mt-5 rounded-full bg-ink px-5 py-2 text-sm font-medium text-white hover:bg-signal">
                 Log in with GitHub
               </button>

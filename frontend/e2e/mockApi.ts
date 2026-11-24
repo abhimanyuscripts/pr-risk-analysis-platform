@@ -67,6 +67,8 @@ export interface MockOptions {
   scoreMapFails?: boolean
   /** Answer /users/me late, so page requests go out while an expired token is still stored. */
   slowSession?: boolean
+  /** Log in as an account that is not in ALLOWED_WRITERS and has no repositories of its own. */
+  reader?: boolean
 }
 
 export async function mockApi(page: Page, options: MockOptions = {}): Promise<MockApi> {
@@ -90,13 +92,17 @@ export async function mockApi(page: Page, options: MockOptions = {}): Promise<Mo
     const loggedIn = token === GOOD_TOKEN
 
     if (path === '/users/me') {
-      return loggedIn ? json(route, 200, { github_username: 'abhimanyuscripts', user_id: 'u1' }) : json(route, 401, { detail: 'Missing or invalid authorization header' })
+      if (!loggedIn) return json(route, 401, { detail: 'Missing or invalid authorization header' })
+      return options.reader
+        ? json(route, 200, { github_username: 'someone-else', user_id: 'u2', can_write: false })
+        : json(route, 200, { github_username: 'abhimanyuscripts', user_id: 'u1', can_write: true })
     }
     if (path === '/repos') {
-      return json(route, 200, loggedIn ? [{ ...DEMO, is_owner: true }, { ...PRIVATE, is_owner: true }] : [{ ...DEMO, is_owner: false }])
+      if (loggedIn && !options.reader) return json(route, 200, [{ ...DEMO, is_owner: true }, { ...PRIVATE, is_owner: true }])
+      return json(route, 200, [{ ...DEMO, is_owner: false }])
     }
     if (path.startsWith('/repos/abhimanyuscripts/pr-risk-analysis-platform')) {
-      if (!loggedIn) return json(route, 404, { detail: 'Repository not found' })
+      if (!loggedIn || options.reader) return json(route, 404, { detail: 'Repository not found' })
       if (path.endsWith('/score-map')) return json(route, 200, { reference_prs: 0, points: [] })
       if (path.endsWith('/prs')) return json(route, 200, { total: 0, limit: 50, offset: 0, items: [] })
     }

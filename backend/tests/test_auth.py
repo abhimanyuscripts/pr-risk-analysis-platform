@@ -40,7 +40,15 @@ def test_wrong_scheme_is_401(client, alice):
 def test_valid_token_returns_the_user(client, alice):
     r = client.get("/api/users/me", headers=auth(alice))
     assert r.status_code == 200
-    assert r.json() == {"github_username": "alice", "user_id": str(alice.id)}
+    assert r.json() == {"github_username": "alice", "user_id": str(alice.id), "can_write": True}
+
+
+def test_can_write_follows_allowed_writers(client, seed, db, monkeypatch):
+    bob = seed.user("Bob", 2)
+    db.commit()
+    assert client.get("/api/users/me", headers=auth(bob)).json()["can_write"] is False
+    monkeypatch.setenv("ALLOWED_WRITERS", "alice, bob")  # read per request, case does not matter
+    assert client.get("/api/users/me", headers=auth(bob)).json()["can_write"] is True
 
 
 def test_lowercase_bearer_is_accepted(client, alice):

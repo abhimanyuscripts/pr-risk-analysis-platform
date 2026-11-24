@@ -77,7 +77,8 @@ export default function PRList() {
       )}
       {map.data && map.data.points.length === 0 && (
         <p className="mt-10 max-w-lg rounded-2xl px-6 py-6 text-sm text-graphite ring-1 ring-rule ring-inset">
-          The risk map appears once the LLM has read some of this repository's pull requests.
+          No risk map yet. The map needs the LLM's answers for this repository's pull requests, and the LLM step
+          runs offline on the project team's machine, not on this site.
         </p>
       )}
 

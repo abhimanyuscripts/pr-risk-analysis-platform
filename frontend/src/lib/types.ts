@@ -14,6 +14,7 @@ export interface Repo {
 export interface Me {
   github_username: string
   user_id: string
+  can_write: boolean // listed in ALLOWED_WRITERS, so may ingest repositories through the API
 }
 
 export interface Label {

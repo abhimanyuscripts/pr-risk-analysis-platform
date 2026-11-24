@@ -83,7 +83,13 @@ def health(db: Session = Depends(get_db)):
 
 @api.get("/users/me", tags=["auth"])
 def read_current_user(current_user: User = Depends(get_current_user)):
-    return {"github_username": current_user.github_username, "user_id": str(current_user.id)}
+    # can_write tells the page which message is true for this account: writers can ingest a
+    # repository through the API, everyone else can only read what is stored.
+    return {
+        "github_username": current_user.github_username,
+        "user_id": str(current_user.id),
+        "can_write": current_user.github_username.lower() in allowed_writers(),
+    }
 
 
 app.include_router(api)
