@@ -95,6 +95,18 @@ From then on every merge to `main` deploys by itself once the CI checks pass.
 Collect on the laptop as usual, then `REPLACE=yes scripts/copy-db-to-neon.sh`. The site shows the new data at
 once; no redeploy is needed.
 
+To take one repository off the live site without touching anything else:
+
+```bash
+scripts/remove-repo-from-neon.sh owner/name               # dry run: prints the rows it would remove, changes nothing
+CONFIRM=yes scripts/remove-repo-from-neon.sh owner/name   # removes them
+```
+
+It works in one transaction and stops without changing anything if a row count does not add up. It refuses
+to remove encode/httpx. The laptop's database keeps the repository, so `copy-db-to-neon.sh` can put it back.
+Note that `REPLACE=yes scripts/copy-db-to-neon.sh` copies everything on the laptop again, including a
+repository removed this way.
+
 ## When something goes wrong
 
 - **The deploy fails with "Not safe to start in production"** (Render > Logs): the lines below it name the
