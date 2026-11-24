@@ -13,10 +13,10 @@ export default function Login() {
           <Mark />
           PR Risk
         </Link>
-        <h1 className="mt-10 text-3xl font-semibold tracking-[-0.02em] text-ink">Log in to see your repositories</h1>
+        <h1 className="mt-10 text-3xl font-semibold tracking-[-0.02em] text-ink">Log in to PR Risk</h1>
         <p className="mt-3 leading-relaxed text-graphite">
-          GitHub tells PR Risk who you are; nothing in your repositories is changed. The {DEMO_REPO} demo is open to
-          everyone without logging in.
+          GitHub tells PR Risk who you are; nothing in your repositories is changed. Adding new repositories isn't open
+          to the public yet. The {DEMO_REPO} demo is open to everyone without logging in.
         </p>
         <button
           onClick={() => startLogin('/repos')}

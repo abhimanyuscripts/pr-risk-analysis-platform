@@ -16,12 +16,30 @@ test('a visitor reads the public demo without logging in', async ({ page }) => {
   expect(api.requests.every((r) => r.token === null)).toBe(true)
 })
 
-test('the repositories page shows the demo, and asks visitors to log in for their own', async ({ page }) => {
+test('the repositories page shows the demo, and tells visitors adding repositories is not open', async ({ page }) => {
   await page.goto('/repos')
   await expect(page.getByRole('heading', { name: 'Public demo' })).toBeVisible()
   await expect(page.getByRole('main').getByRole('link', { name: /encode\/httpx/ })).toContainText('1,805')
   await expect(page.getByRole('heading', { name: 'Your own repositories' })).toBeVisible()
+  await expect(page.getByText("Adding repositories isn't open to the public yet.")).toBeVisible()
   await expect(page.getByRole('main').getByRole('button', { name: 'Log in with GitHub' })).toBeVisible()
+})
+
+test('an account that cannot write is told adding repositories is not open yet', async ({ page }) => {
+  api = await mockApi(page, { reader: true })
+  await loginAs(page)
+  await page.goto('/repos')
+  await expect(header(page).getByText('@someone-else')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Private to you' })).toBeVisible()
+  await expect(page.getByText("Adding your own repositories isn't open yet.", { exact: false })).toBeVisible()
+  await expect(page.getByText('Ingest a repository through the API')).toHaveCount(0)
+})
+
+test('the owner sees their private repository, without the "not open yet" note', async ({ page }) => {
+  await loginAs(page)
+  await page.goto('/repos')
+  await expect(page.getByRole('link', { name: /pr-risk-analysis-platform/ })).toBeVisible()
+  await expect(page.getByText("Adding your own repositories isn't open yet.", { exact: false })).toHaveCount(0)
 })
 
 test('logging in from a page returns to that page and keeps the token out of the address bar', async ({ page }) => {
@@ -49,7 +67,8 @@ test('a private repository is "not here" for visitors, and opens after logging i
   await page.getByRole('main').getByRole('button', { name: 'Log in with GitHub' }).click()
   await expect(page).toHaveURL(/\/repos\/abhimanyuscripts\/pr-risk-analysis-platform$/)
   await expect(page.getByText('No repository here.')).toHaveCount(0)
-  await expect(page.getByText('The risk map appears once the LLM has read')).toBeVisible()
+  await expect(page.getByText('No risk map yet.')).toBeVisible()
+  await expect(page.getByText('runs offline on the project team')).toBeVisible()
 })
 
 test('an expired token is dropped quietly and the public page still loads', async ({ page }) => {

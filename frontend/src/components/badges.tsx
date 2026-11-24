@@ -38,7 +38,7 @@ export function LabelBadge({ label }: { label: Label | null }) {
 }
 
 export function HybridBar({ hybrid }: { hybrid: Hybrid | null }) {
-  if (!hybrid) return <span className="text-xs text-graphite/70" title="Needs an LLM answer and metrics">not scored</span>
+  if (!hybrid) return <span className="text-xs text-graphite/70" title="Needs metrics and an LLM answer. The LLM step runs offline, not on this site.">not scored</span>
   const tip = `Size percentile ${hybrid.size_percentile}, LLM percentile ${hybrid.llm_percentile}, against ${hybrid.reference_prs} analysed PRs`
   return (
     <div className="flex items-center gap-3" title={tip}>
