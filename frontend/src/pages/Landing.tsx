@@ -9,6 +9,7 @@ import { startLogin } from '../lib/api'
 import { DEMO_PATH, DEMO_REPO } from '../lib/config'
 import { gsap, prefersReducedMotion, useSmoothScroll } from '../lib/motion'
 import { RESULTS, TEST_PRS } from '../lib/research'
+import { useSession } from '../lib/session'
 import { storyStats } from '../lib/storyStats'
 import type { MapPoint, Repo, ScoreMap } from '../lib/types'
 import { useApi } from '../lib/useApi'
@@ -22,6 +23,7 @@ export default function Landing() {
   const map = useApi<ScoreMap>(`/repos/${DEMO_REPO}/score-map`)
   const repos = useApi<Repo[]>('/repos')
   const demo = repos.data?.find((r) => r.full_name === DEMO_REPO)
+  const { user } = useSession()
   const hero = useRef<HTMLElement>(null)
 
   // The one orchestrated moment on load: the headline rises line by line.
@@ -58,9 +60,15 @@ export default function Landing() {
             <Link to={DEMO_PATH} className="rounded-full bg-ink px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-signal">
               Open the {DEMO_REPO} demo
             </Link>
-            <button onClick={() => startLogin('/repos')} className="rounded-full px-6 py-3 text-sm font-semibold text-ink ring-1 ring-ink/20 transition-colors hover:bg-surface">
-              Log in with GitHub
-            </button>
+            {user ? (
+              <Link to="/repos" className="rounded-full px-6 py-3 text-sm font-semibold text-ink ring-1 ring-ink/20 transition-colors hover:bg-surface">
+                Your repositories
+              </Link>
+            ) : (
+              <button onClick={() => startLogin('/repos')} className="rounded-full px-6 py-3 text-sm font-semibold text-ink ring-1 ring-ink/20 transition-colors hover:bg-surface">
+                Log in with GitHub
+              </button>
+            )}
           </div>
           <dl data-fade="" className="mt-16 grid max-w-2xl grid-cols-3 gap-6 border-t border-rule pt-6 text-sm">
             <Fact label="Pull requests collected" value={demo ? demo.pr_count.toLocaleString() : '1,805'} />

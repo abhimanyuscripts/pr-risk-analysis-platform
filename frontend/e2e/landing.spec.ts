@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { MAP, mockApi } from './mockApi'
+import { loginAs, MAP, mockApi } from './mockApi'
 
 const fixes = MAP.points.filter((p) => p.hindsight === 'fix').length
 const storyMap = (page: Page) => page.getByRole('img', { name: /Risk map of 390 pull requests read by the LLM/ })
@@ -70,4 +70,15 @@ test('if the map cannot load, the page says so and everything else works', async
   await page.goto('/')
   await expect(page.getByText('The map could not be loaded. The demo has the same data.')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'What the score is not' })).toBeVisible()
+})
+
+test('once logged in, the start page offers your repositories instead of logging in again', async ({ page }) => {
+  await mockApi(page)
+  await loginAs(page)
+  await page.goto('/')
+  const main = page.getByRole('main')
+  await expect(main.getByRole('link', { name: 'Your repositories' })).toBeVisible()
+  await expect(main.getByRole('button', { name: 'Log in with GitHub' })).toHaveCount(0)
+  await main.getByRole('link', { name: 'Your repositories' }).click()
+  await expect(page).toHaveURL(/\/repos$/)
 })
